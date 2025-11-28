@@ -10,10 +10,10 @@ interface Star {
 }
 
 export function CosmicStars() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const starsRef = useRef<Star[]>([]);
   const mousePos = useRef({ x: 0, y: 0 });
-  const animationFrameId = useRef<number>();
+  const animationFrameId = useRef<number | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -67,7 +67,7 @@ export function CosmicStars() {
         const maxDistance = 200;
 
         // Move star away from mouse
-        if (distance < maxDistance) {
+        if (distance < maxDistance && distance !== 0) {
           const force = (maxDistance - distance) / maxDistance;
           star.x -= (dx / distance) * force * 2;
           star.y -= (dy / distance) * force * 2;
@@ -83,8 +83,15 @@ export function CosmicStars() {
         if (star.x > canvas.width) star.x = 0;
 
         // Draw star
-        const gradient = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, star.size);
-        
+        const gradient = ctx.createRadialGradient(
+          star.x,
+          star.y,
+          0,
+          star.x,
+          star.y,
+          star.size
+        );
+
         // Alternate colors for cosmic effect
         if (star.id % 3 === 0) {
           gradient.addColorStop(0, `rgba(176, 67, 255, ${star.opacity})`);
@@ -118,7 +125,7 @@ export function CosmicStars() {
     return () => {
       window.removeEventListener('resize', updateSize);
       window.removeEventListener('mousemove', handleMouseMove);
-      if (animationFrameId.current) {
+      if (animationFrameId.current !== null) {
         cancelAnimationFrame(animationFrameId.current);
       }
     };

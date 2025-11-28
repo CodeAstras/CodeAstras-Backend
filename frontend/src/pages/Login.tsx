@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Code2, Mail, Lock, Github, Chrome, ArrowRight, Sparkles, Terminal } from 'lucide-react';
-import { CosmicStars } from '../components/workspace/CosmicStars';
+import { CosmicStars } from "../components/workspace/CosmicStars";
+
+import { useNavigate } from 'react-router-dom';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [focusedField, setFocusedField] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   return (
     <div className="min-h-screen bg-[#06070F] text-white relative overflow-hidden flex items-center justify-center">
@@ -191,9 +194,12 @@ export default function Login() {
 
               {/* Forgot Password */}
               <div className="flex justify-end">
-                <a href="#" className="text-sm text-[#00CFFF] hover:text-[#6B54FF] transition-colors">
+                <button
+                  type="button"
+                  className="text-sm text-[#00CFFF] hover:text-[#6B54FF] transition-colors"
+                >
                   Forgot Password?
-                </a>
+                </button>
               </div>
 
               {/* Login Button */}
@@ -218,11 +224,11 @@ export default function Login() {
 
             {/* Social Login Buttons */}
             <div className="space-y-3">
-              <button className="w-full bg-white/5 border border-white/10 hover:border-[#6B54FF]/50 hover:bg-white/10 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-3 group">
+              <button className="w-full bg:white/5 border border-white/10 hover:border-[#6B54FF]/50 hover:bg-white/10 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-3 group">
                 <Github className="w-5 h-5" />
                 <span>Continue with GitHub</span>
               </button>
-              <button className="w-full bg-white/5 border border-white/10 hover:border-[#00CFFF]/50 hover:bg-white/10 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-3 group">
+              <button className="w-full bg:white/5 border border-white/10 hover:border-[#00CFFF]/50 hover:bg-white/10 text-white py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-3 group">
                 <Chrome className="w-5 h-5" />
                 <span>Continue with Google</span>
               </button>
@@ -231,10 +237,14 @@ export default function Login() {
             {/* Sign Up Link */}
             <div className="mt-8 text-center">
               <p className="text-[#8892A6]">
-                Don't have an account?{' '}
-                <a href="#/signup" className="text-[#00CFFF] hover:text-[#6B54FF] font-semibold transition-colors">
+                Don&apos;t have an account?{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/signup')}
+                  className="text-[#00CFFF] hover:text-[#6B54FF] font-semibold transition-colors"
+                >
                   Sign Up
-                </a>
+                </button>
               </p>
             </div>
           </div>

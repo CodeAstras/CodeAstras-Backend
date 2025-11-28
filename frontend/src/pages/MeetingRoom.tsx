@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Mic,
   MicOff,
@@ -22,16 +23,17 @@ import {
   Play,
   Send,
   Smile,
-  MoreVertical,
-  ChevronDown,
   Minimize2,
   Maximize2,
 } from 'lucide-react';
-import { CosmicStars } from '../components/workspace/CosmicStars';
+import { CosmicStars } from "../components/workspace/CosmicStars";
+
 
 type Tab = 'code' | 'whiteboard' | 'screen' | 'tasks';
 
 export default function MeetingRoom() {
+  const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState<Tab>('code');
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
@@ -65,10 +67,12 @@ export default function MeetingRoom() {
   // Simulate voice activity animation
   useEffect(() => {
     const interval = setInterval(() => {
-      setParticipants(prev => prev.map(p => ({
-        ...p,
-        speaking: Math.random() > 0.7 && !p.muted && p.id !== 5
-      })));
+      setParticipants(prev =>
+        prev.map(p => ({
+          ...p,
+          speaking: Math.random() > 0.7 && !p.muted && p.id !== 5,
+        })),
+      );
     }, 1500);
     return () => clearInterval(interval);
   }, []);
@@ -90,7 +94,7 @@ export default function MeetingRoom() {
     <div className="min-h-screen bg-[#0a0a0a] text-white overflow-hidden relative">
       {/* Cosmic background */}
       <CosmicStars />
-      
+
       {/* Subtle background gradients */}
       <div className="fixed inset-0 pointer-events-none opacity-10">
         <div className="absolute top-0 right-1/3 w-[600px] h-[600px] bg-[#7c3aed] rounded-full blur-[150px]" />
@@ -141,13 +145,14 @@ export default function MeetingRoom() {
                     <Maximize2 className="w-4 h-4 text-white/60" />
                   )}
                 </button>
-                <a
-                  href="#/dashboard"
+                <button
+                  type="button"
+                  onClick={() => navigate('/dashboard')}
                   className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-all text-red-400"
                 >
                   <LogOut className="w-4 h-4" />
                   <span className="text-sm">Leave Room</span>
-                </a>
+                </button>
               </div>
             </div>
           </div>

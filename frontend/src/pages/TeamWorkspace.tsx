@@ -34,13 +34,16 @@ import {
   Activity,
   Database,
 } from 'lucide-react';
-import { CosmicStars } from '../components/workspace/CosmicStars';
+import { CosmicStars } from "../components/workspace/CosmicStars";
+
+import { useNavigate } from 'react-router-dom';
 
 type TabView = 'overview' | 'code' | 'files' | 'tasks' | 'members' | 'docs' | 'settings';
 
 export default function TeamWorkspace() {
   const [activeTab, setActiveTab] = useState<TabView>('overview');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const navigate = useNavigate();
 
   // Mock data
   const teamInfo = {
@@ -164,7 +167,11 @@ export default function TeamWorkspace() {
         <div className="px-6 h-16 flex items-center justify-between">
           {/* Left - Team Info */}
           <div className="flex items-center gap-4">
-            <a href="#/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+            >
               <div className="relative">
                 <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] flex items-center justify-center">
                   <Code2 className="w-5 h-5" />
@@ -172,7 +179,7 @@ export default function TeamWorkspace() {
                 <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] blur-md opacity-50" />
               </div>
               <span className="text-sm text-white/60">CodeAstra</span>
-            </a>
+            </button>
 
             <div className="w-px h-6 bg-white/10" />
 
@@ -209,7 +216,7 @@ export default function TeamWorkspace() {
                   className={`relative px-4 py-2 rounded-lg transition-all duration-300 flex items-center gap-2 ${
                     activeTab === tab.id
                       ? 'text-white'
-                      : 'text-white/60 hover:text-white/90 hover:bg-white/5'
+                      : 'text-white/60 hover:text-white/90 hover:bg:white/5'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -257,13 +264,13 @@ export default function TeamWorkspace() {
                     <Plus className="w-4 h-4" />
                     New Project
                   </button>
-                  <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-all text-sm text-white/80">
+                  <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg:white/5 transition-all text-sm text-white/80">
                     <UserPlus className="w-4 h-4" />
                     Invite Member
                   </button>
                   <button 
-                    onClick={() => window.location.hash = '/room'}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-all text-sm text-white/80"
+                    onClick={() => navigate('/room')}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg:white/5 transition-all text-sm text-white/80"
                   >
                     <Video className="w-4 h-4" />
                     Start Room
@@ -278,7 +285,7 @@ export default function TeamWorkspace() {
                   {projects.map((project) => (
                     <button
                       key={project.id}
-                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-all text-sm group"
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg:white/5 transition-all text-sm group"
                     >
                       <div className="flex items-center gap-2">
                         <div
@@ -302,7 +309,7 @@ export default function TeamWorkspace() {
                     <span className="text-xs text-green-400">3 members active</span>
                   </div>
                   <button 
-                    onClick={() => window.location.hash = '/room'}
+                    onClick={() => navigate('/room')}
                     className="w-full px-3 py-2 bg-gradient-to-r from-[#7c3aed] to-[#0ea5e9] rounded-lg text-sm font-medium hover:shadow-lg hover:shadow-[#7c3aed]/30 transition-all"
                   >
                     Join Channel
@@ -357,7 +364,7 @@ export default function TeamWorkspace() {
                       <UserPlus className="w-4 h-4" />
                       Invite Member
                     </button>
-                    <button className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all flex items-center justify-center gap-2">
+                    <button className="w-full px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg:white/10 transition-all flex items-center justify-center gap-2">
                       <Plus className="w-4 h-4" />
                       Create Project
                     </button>
@@ -398,7 +405,7 @@ export default function TeamWorkspace() {
                             {project.tech.map((tech) => (
                               <span
                                 key={tech}
-                                className="px-2 py-1 bg-white/5 border border-white/10 rounded text-xs text-white/70"
+                                className="px-2 py-1 bg:white/5 border border-white/10 rounded text-xs text-white/70"
                               >
                                 {tech}
                               </span>
@@ -437,7 +444,7 @@ export default function TeamWorkspace() {
                           </div>
                         </div>
                         <button 
-                          onClick={() => window.location.hash = '/workspace'}
+                          onClick={() => navigate('/workspace')}
                           className="px-4 py-2 bg-gradient-to-r from-[#7c3aed]/20 to-[#0ea5e9]/20 border border-[#7c3aed]/30 rounded-lg text-sm hover:from-[#7c3aed]/30 hover:to-[#0ea5e9]/30 transition-all"
                         >
                           Open Project
@@ -490,13 +497,13 @@ export default function TeamWorkspace() {
             <div className="h-full">
               <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl p-8 flex items-center justify-center h-[600px]">
                 <div className="text-center">
-                  <Code2 className="w-16 h-16 text-white/20 mx-auto mb-4" />
+                  <Code2 className="w-16 h-16 text:white/20 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold mb-2">Team Code Workspace</h3>
                   <p className="text-white/40 mb-6 max-w-md">
                     Full-featured IDE with real-time collaboration, version control, and terminal access
                   </p>
                   <button 
-                    onClick={() => window.location.hash = '/workspace'}
+                    onClick={() => navigate('/workspace')}
                     className="px-6 py-3 bg-gradient-to-r from-[#7c3aed] to-[#0ea5e9] rounded-xl hover:shadow-lg hover:shadow-[#7c3aed]/30 transition-all"
                   >
                     Open Workspace
@@ -515,7 +522,7 @@ export default function TeamWorkspace() {
                   Team Files
                 </h2>
                 <div className="flex items-center gap-2">
-                  <button className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all flex items-center gap-2">
+                  <button className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg:white/10 transition-all flex items-center gap-2">
                     <Upload className="w-4 h-4" />
                     Upload
                   </button>
@@ -526,7 +533,7 @@ export default function TeamWorkspace() {
                 </div>
               </div>
 
-              <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl overflow-hidden">
+              <div className="bg-[#0f0f0f] border border:white/5 rounded-2xl overflow-hidden">
                 {/* File table header */}
                 <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-white/5 text-xs uppercase text-white/40">
                   <div className="col-span-6">Name</div>
@@ -541,17 +548,17 @@ export default function TeamWorkspace() {
                   return (
                     <div
                       key={file.id}
-                      className="grid grid-cols-12 gap-4 px-6 py-4 border-b border-white/5 hover:bg-white/5 transition-all cursor-pointer group"
+                      className="grid grid-cols-12 gap-4 px-6 py-4 border-b border-white/5 hover:bg:white/5 transition-all cursor-pointer group"
                     >
                       <div className="col-span-6 flex items-center gap-3">
-                        <Icon className="w-5 h-5 text-white/40" />
+                        <Icon className="w-5 h-5 text:white/40" />
                         <span className="text-sm">{file.name}</span>
                       </div>
                       <div className="col-span-2 text-sm text-white/60">{file.size}</div>
-                      <div className="col-span-3 text-sm text-white/60">{file.modified}</div>
+                      <div className="col-span-3 text-sm text:white/60">{file.modified}</div>
                       <div className="col-span-1">
-                        <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg-white/10 rounded transition-all">
-                          <MoreVertical className="w-4 h-4 text-white/60" />
+                        <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg:white/10 rounded transition-all">
+                          <MoreVertical className="w-4 h-4 text:white/60" />
                         </button>
                       </div>
                     </div>
@@ -579,19 +586,19 @@ export default function TeamWorkspace() {
                 {['todo', 'in-progress', 'review', 'done'].map((status) => {
                   const statusTasks = tasks.filter((t) => t.status === status);
                   return (
-                    <div key={status} className="bg-[#0f0f0f] border border-white/5 rounded-2xl p-4">
+                    <div key={status} className="bg-[#0f0f0f] border border:white/5 rounded-2xl p-4">
                       <div className="flex items-center justify-between mb-4">
-                        <h3 className="font-semibold text-sm uppercase text-white/80">
+                        <h3 className="font-semibold text-sm uppercase text:white/80">
                           {status === 'in-progress' ? 'In Progress' : status.replace('-', ' ')}
                         </h3>
-                        <div className="px-2 py-1 bg-white/5 rounded-full text-xs">{statusTasks.length}</div>
+                        <div className="px-2 py-1 bg:white/5 rounded-full text-xs">{statusTasks.length}</div>
                       </div>
 
                       <div className="space-y-3">
                         {statusTasks.map((task) => (
                           <div
                             key={task.id}
-                            className="bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 transition-all cursor-pointer group"
+                            className="bg:white/5 border border:white/10 rounded-xl p-4 hover:bg:white/10 transition-all cursor-pointer group"
                           >
                             <div className="flex items-start justify-between mb-3">
                               <p className="text-sm font-medium flex-1">{task.title}</p>
@@ -656,7 +663,7 @@ export default function TeamWorkspace() {
                   return (
                     <div
                       key={member.id}
-                      className="bg-[#0f0f0f] border border-white/5 rounded-2xl p-6 hover:border-white/10 transition-all"
+                      className="bg-[#0f0f0f] border border:white/5 rounded-2xl p-6 hover:border:white/10 transition-all"
                     >
                       <div className="flex items-start gap-4 mb-4">
                         <div className="relative">
@@ -686,11 +693,11 @@ export default function TeamWorkspace() {
                       </div>
 
                       <div className="flex gap-2">
-                        <button className="flex-1 px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs hover:bg-white/10 transition-all">
+                        <button className="flex-1 px-3 py-2 bg:white/5 border border:white/10 rounded-lg text-xs hover:bg:white/10 transition-all">
                           <MessageSquare className="w-3 h-3 inline mr-1" />
                           Message
                         </button>
-                        <button className="px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-xs hover:bg-white/10 transition-all">
+                        <button className="px-3 py-2 bg:white/5 border border:white/10 rounded-lg text-xs hover:bg:white/10 transition-all">
                           <MoreVertical className="w-3 h-3" />
                         </button>
                       </div>
@@ -715,7 +722,7 @@ export default function TeamWorkspace() {
                 </button>
               </div>
 
-              <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl p-8">
+              <div className="bg-[#0f0f0f] border border:white/5 rounded-2xl p-8">
                 <div className="max-w-3xl">
                   <h3 className="text-xl font-semibold mb-4">📚 Getting Started</h3>
                   <div className="space-y-4 text-white/70">
@@ -754,29 +761,31 @@ export default function TeamWorkspace() {
               </div>
 
               <div className="space-y-6 max-w-2xl">
-                <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl p-6">
+                <div className="bg-[#0f0f0f] border border:white/5 rounded-2xl p-6">
                   <h3 className="font-semibold mb-4">General Settings</h3>
                   <div className="space-y-4">
                     <div>
-                      <label className="text-sm text-white/60 mb-2 block">Team Name</label>
+                      <label className="text-sm text:white/60 mb-2 block">Team Name</label>
                       <input
                         type="text"
                         value={teamInfo.name}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:outline-none focus:border-[#7c3aed]/50"
+                        className="w-full bg:white/5 border border:white/10 rounded-lg px-4 py-2 focus:outline-none focus:border-[#7c3aed]/50"
+                        readOnly
                       />
                     </div>
                     <div>
-                      <label className="text-sm text-white/60 mb-2 block">Description</label>
+                      <label className="text-sm text:white/60 mb-2 block">Description</label>
                       <textarea
                         value={teamInfo.description}
                         rows={3}
-                        className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:outline-none focus:border-[#7c3aed]/50 resize-none"
+                        className="w-full bg:white/5 border border:white/10 rounded-lg px-4 py-2 focus:outline-none focus:border-[#7c3aed]/50 resize-none"
+                        readOnly
                       />
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-[#0f0f0f] border border-white/5 rounded-2xl p-6">
+                <div className="bg-[#0f0f0f] border border:white/5 rounded-2xl p-6">
                   <h3 className="font-semibold mb-4">Permissions</h3>
                   <div className="space-y-3">
                     {['Owner', 'Admin', 'Editor', 'Viewer'].map((role) => (
@@ -788,7 +797,7 @@ export default function TeamWorkspace() {
                           })()}
                           <span>{role}</span>
                         </div>
-                        <button className="text-sm text-white/60 hover:text-white">Configure</button>
+                        <button className="text-sm text:white/60 hover:text:white">Configure</button>
                       </div>
                     ))}
                   </div>
@@ -796,7 +805,7 @@ export default function TeamWorkspace() {
 
                 <div className="bg-[#0f0f0f] border border-red-500/20 rounded-2xl p-6">
                   <h3 className="font-semibold mb-2 text-red-400">Danger Zone</h3>
-                  <p className="text-sm text-white/60 mb-4">
+                  <p className="text-sm text:white/60 mb-4">
                     Deleting this workspace is permanent and cannot be undone.
                   </p>
                   <button className="px-4 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400 hover:bg-red-500/20 transition-all">

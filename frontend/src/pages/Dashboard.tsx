@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from "react-router-dom";
 import { 
   Code2, 
   Users, 
@@ -17,28 +18,14 @@ import {
   MessageCircle,
   Settings
 } from 'lucide-react';
-import { CosmicStars } from '../components/workspace/CosmicStars';
-import { useNavigate } from "react-router-dom";
-import { createProject } from "../services/api";
-
+import { CosmicStars } from "../components/workspace/CosmicStars";
 
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('home');
 
-  const navigate = useNavigate();
-
-    const handleStartNewProject = async () => {
-        try {
-            const result = await createProject();
-            navigate(`/editor/${result.projectId}`);
-        } catch (err) {
-            console.error("Failed to create project:", err);
-        }
-    };
-
-
-    // Mock data
+  // Mock data
   const projects = [
     { id: 1, name: 'E-Commerce API', language: 'TypeScript', lastEdited: '2 hours ago', members: ['A', 'B', 'C'], color: '#7c3aed' },
     { id: 2, name: 'Chat Application', language: 'React', lastEdited: '5 hours ago', members: ['D', 'E'], color: '#0ea5e9' },
@@ -88,7 +75,11 @@ export default function Dashboard() {
       <header className="fixed top-0 left-0 right-0 z-50 bg-[#0f0f0f]/95 backdrop-blur-md border-b border-white/5">
         <div className="max-w-[1800px] mx-auto px-6 h-16 flex items-center justify-between">
           {/* Logo */}
-          <a href="#/" className="flex items-center gap-3 group">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="flex items-center gap-3 group"
+          >
             <div className="relative">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] flex items-center justify-center">
                 <Code2 className="w-5 h-5" />
@@ -98,7 +89,7 @@ export default function Dashboard() {
             <span className="text-xl font-semibold bg-gradient-to-r from-[#7c3aed] to-[#0ea5e9] bg-clip-text text-transparent">
               CodeAstra
             </span>
-          </a>
+          </button>
 
           {/* Navigation Menu */}
           <nav className="flex items-center gap-1">
@@ -119,16 +110,17 @@ export default function Dashboard() {
 
           {/* Right Icons */}
           <div className="flex items-center gap-3">
-            <button className="relative p-2 rounded-lg hover:bg-white/5 transition-colors">
+            <button className="relative p-2 rounded-lg hover:bg:white/5 transition-colors">
               <Bell className="w-5 h-5 text-white/60" />
               <div className="absolute top-1 right-1 w-2 h-2 bg-[#0ea5e9] rounded-full animate-pulse" />
             </button>
-            <a 
-              href="#/profile"
+            <button
+              type="button"
+              onClick={() => navigate('/profile')}
               className="w-10 h-10 rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] flex items-center justify-center font-semibold cursor-pointer hover:shadow-lg hover:shadow-[#7c3aed]/30 transition-all"
             >
               AC
-            </a>
+            </button>
           </div>
         </div>
       </header>
@@ -147,7 +139,7 @@ export default function Dashboard() {
 
             <div className="relative z-10 flex items-center justify-between">
               <div className="flex-1">
-                <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from-white via-white to-white/70 bg-clip-text text-transparent">
+                <h1 className="text-5xl font-bold mb-3 bg-gradient-to-r from:white via:white to-white/70 bg-clip-text text-transparent">
                   Welcome to CodeAstra
                 </h1>
                 <p className="text-xl text-white/60 mb-8">
@@ -160,17 +152,17 @@ export default function Dashboard() {
                     Create Room
                   </button>
                   <button 
-                    onClick={() => window.location.hash = '/team'}
+                    onClick={() => navigate('/team')}
                     className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl font-medium hover:bg-white/10 transition-all duration-300 flex items-center gap-2"
                   >
                     <Users className="w-5 h-5" />
                     Team Workspace
                   </button>
-                  <button className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl font-medium hover:bg-white/10 transition-all duration-300 flex items-center gap-2">
+                  <button className="px-6 py-3 bg:white/5 border border-white/10 rounded-xl font-medium hover:bg:white/10 transition-all duration-300 flex items-center gap-2">
                     <Folder className="w-5 h-5" />
                     Start New Project
                   </button>
-                  <button className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl font-medium hover:bg-white/10 transition-all duration-300 flex items-center gap-2">
+                  <button className="px-6 py-3 bg:white/5 border border-white/10 rounded-xl font-medium hover:bg:white/10 transition-all duration-300 flex items-center gap-2">
                     <Code2 className="w-5 h-5" />
                     Join via Code
                   </button>
@@ -218,13 +210,10 @@ export default function Dashboard() {
                 <Folder className="w-6 h-6 text-[#7c3aed]" />
                 Your Projects
               </h2>
-                <button
-                    onClick={handleStartNewProject}
-                    className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all flex items-center gap-2"
-                >
-                    <Plus className="w-4 h-4" />
-                    New Project
-                </button>
+              <button className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                New Project
+              </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -265,7 +254,7 @@ export default function Dashboard() {
                         ))}
                       </div>
                       <button 
-                        onClick={() => window.location.hash = '/workspace'}
+                        onClick={() => navigate('/workspace')}
                         className="px-4 py-1.5 bg-gradient-to-r from-[#7c3aed]/20 to-[#0ea5e9]/20 border border-[#7c3aed]/30 rounded-lg text-sm hover:from-[#7c3aed]/30 hover:to-[#0ea5e9]/30 transition-all"
                       >
                         Open
@@ -359,7 +348,7 @@ export default function Dashboard() {
                 </div>
 
                 <button 
-                  onClick={() => window.location.hash = '/room'}
+                  onClick={() => navigate('/room')}
                   className="w-full px-4 py-2 bg-gradient-to-r from-[#0ea5e9]/20 to-[#06b6d4]/20 border border-[#0ea5e9]/30 rounded-xl text-sm font-medium hover:from-[#0ea5e9]/30 hover:to-[#06b6d4]/30 transition-all"
                 >
                   Join Room

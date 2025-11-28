@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   User,
   Award,
@@ -12,42 +13,32 @@ import {
   Code2,
   Users,
   Flame,
-  Globe,
   GitBranch,
   Lock,
-  Bell,
-  Eye,
   Shield,
   Mic,
   Volume2,
   Palette,
-  Keyboard,
-  Type,
-  Monitor,
-  Moon,
-  Sun,
-  Github,
   Chrome,
   Star,
-  Trophy,
-  Rocket,
   Target,
-  Coffee,
   BookOpen,
   Video,
-  MessageSquare,
-  Check,
-  X,
+  Trophy,
+  Moon,
+  Github,
   ChevronRight,
-  Link as LinkIcon,
-  Edit3,
+  Edit3, 
   Camera,
 } from 'lucide-react';
-import { CosmicStars } from '../components/workspace/CosmicStars';
+import { CosmicStars } from "../components/workspace/CosmicStars";
+
 
 type TabView = 'profile' | 'badges' | 'streaks' | 'contributions' | 'settings' | 'preferences';
 
 export default function Profile() {
+  const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState<TabView>('profile');
   const [editingBio, setEditingBio] = useState(false);
 
@@ -88,7 +79,7 @@ export default function Profile() {
   const generateContributions = () => {
     const contributions: { date: string; count: number }[] = [];
     const today = new Date();
-    
+
     for (let i = 364; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
@@ -150,7 +141,7 @@ export default function Profile() {
     <div className="min-h-screen bg-[#0a0a0a] text-white relative overflow-hidden">
       {/* Cosmic background */}
       <CosmicStars />
-      
+
       {/* Subtle background gradients */}
       <div className="fixed inset-0 pointer-events-none opacity-10">
         <div className="absolute top-0 right-1/4 w-[600px] h-[600px] bg-[#7c3aed] rounded-full blur-[150px]" />
@@ -160,7 +151,11 @@ export default function Profile() {
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-[#0f0f0f]/95 backdrop-blur-md border-b border-white/5">
         <div className="px-6 h-16 flex items-center justify-between">
-          <a href="#/dashboard" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+          >
             <div className="relative">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] flex items-center justify-center">
                 <Code2 className="w-5 h-5" />
@@ -168,16 +163,28 @@ export default function Profile() {
               <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-[#7c3aed] to-[#0ea5e9] blur-md opacity-50" />
             </div>
             <span className="text-sm text-white/60">CodeAstra</span>
-          </a>
+          </button>
 
           <div className="flex items-center gap-4">
-            <a href="#/dashboard" className="px-4 py-2 text-sm text-white/60 hover:text-white transition-colors">
+            <button
+              type="button"
+              onClick={() => navigate('/dashboard')}
+              className="px-4 py-2 text-sm text-white/60 hover:text-white transition-colors"
+            >
               Dashboard
-            </a>
-            <a href="#/team" className="px-4 py-2 text-sm text-white/60 hover:text-white transition-colors">
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/team')}
+              className="px-4 py-2 text-sm text-white/60 hover:text-white transition-colors"
+            >
               Team
-            </a>
-            <button className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all">
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all"
+            >
               <LogOut className="w-4 h-4" />
               Sign Out
             </button>
@@ -210,7 +217,11 @@ export default function Profile() {
             })}
 
             <div className="pt-4 mt-4 border-t border-white/5">
-              <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 transition-all">
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-500/10 transition-all"
+              >
                 <LogOut className="w-5 h-5" />
                 <span className="font-medium">Log Out</span>
               </button>
@@ -229,16 +240,23 @@ export default function Profile() {
                 <div className="h-40 bg-[#0a0a0a] relative overflow-hidden">
                   {/* Cosmic gradient overlay */}
                   <div className="absolute inset-0 bg-gradient-to-r from-[#7c3aed]/30 via-[#0ea5e9]/20 to-[#7c3aed]/30" />
-                  
+
                   {/* Grid pattern */}
                   <div className="absolute inset-0 opacity-20">
-                    <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, rgba(124,58,237,0.4) 1px, transparent 0)', backgroundSize: '32px 32px' }} />
+                    <div
+                      className="absolute inset-0"
+                      style={{
+                        backgroundImage:
+                          'radial-gradient(circle at 2px 2px, rgba(124,58,237,0.4) 1px, transparent 0)',
+                        backgroundSize: '32px 32px',
+                      }}
+                    />
                   </div>
-                  
+
                   {/* Glowing orbs */}
                   <div className="absolute top-0 left-1/4 w-32 h-32 bg-[#7c3aed] rounded-full blur-3xl opacity-30" />
                   <div className="absolute bottom-0 right-1/3 w-40 h-40 bg-[#0ea5e9] rounded-full blur-3xl opacity-20" />
-                  
+
                   {/* Stars */}
                   <div className="absolute inset-0">
                     {Array.from({ length: 30 }).map((_, i) => (
@@ -318,10 +336,7 @@ export default function Profile() {
                           className="bg-white/5 border border-white/10 rounded-2xl p-4 hover:border-white/20 transition-all group"
                         >
                           <div className="flex items-center gap-3 mb-2">
-                            <div
-                              className="p-2 rounded-lg"
-                              style={{ backgroundColor: `${stat.color}20` }}
-                            >
+                            <div className="p-2 rounded-lg" style={{ backgroundColor: `${stat.color}20` }}>
                               <Icon className="w-5 h-5" style={{ color: stat.color }} />
                             </div>
                           </div>
@@ -500,21 +515,18 @@ export default function Profile() {
                   <GitBranch className="w-8 h-8 text-[#7c3aed]" />
                   Contribution Graph
                 </h1>
-                <p className="text-white/60">1,247 contributions in the last year</p>
               </div>
 
               {/* Contribution Heatmap */}
               <div className="bg-[#0f0f0f] border border-white/5 rounded-3xl p-8 overflow-x-auto">
                 <div className="min-w-[900px]">
                   <div className="flex gap-1">
-                    {/* Generate 52 weeks */}
                     {Array.from({ length: 52 }).map((_, weekIdx) => (
                       <div key={weekIdx} className="flex flex-col gap-1">
-                        {/* Generate 7 days */}
                         {Array.from({ length: 7 }).map((_, dayIdx) => {
                           const contribution = contributions[weekIdx * 7 + dayIdx];
                           if (!contribution) return null;
-                          
+
                           return (
                             <div
                               key={dayIdx}
@@ -735,13 +747,7 @@ export default function Profile() {
                       <span>Font Size</span>
                       <span className="text-white">14px</span>
                     </label>
-                    <input
-                      type="range"
-                      min="10"
-                      max="24"
-                      defaultValue="14"
-                      className="w-full accent-[#7c3aed]"
-                    />
+                    <input type="range" min="10" max="24" defaultValue="14" className="w-full accent-[#7c3aed]" />
                   </div>
 
                   <div>
@@ -792,13 +798,7 @@ export default function Profile() {
                       <span>Input Volume</span>
                       <span className="text-white">75%</span>
                     </label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      defaultValue="75"
-                      className="w-full accent-[#7c3aed]"
-                    />
+                    <input type="range" min="0" max="100" defaultValue="75" className="w-full accent-[#7c3aed]" />
                   </div>
 
                   <button className="px-6 py-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 transition-all flex items-center gap-2">
