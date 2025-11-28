@@ -1,15 +1,35 @@
 import { motion, useScroll, useMotionValueEvent } from "motion/react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 export function Header() {
-  const navItems = [
-    { label: "Pricing", action: () => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' }) },
-    { label: "About", action: () => {} },
-    { label: "Dashboard", action: () => window.location.hash = '/dashboard' },
-    { label: "Login", action: () => window.location.hash = '/login', primary: true }
-  ];
-  const [hidden, setHidden] = useState(false);
-  const { scrollY } = useScroll();
+
+    const navigate = useNavigate();
+
+    const navItems = [
+        {
+            label: "Pricing",
+            action: () => document.getElementById('pricing')?.scrollIntoView({ behavior: 'smooth' })
+        },
+        {
+            label: "About",
+            action: () => {}
+        },
+        {
+            label: "Dashboard",
+            action: () => navigate('/dashboard')
+        },
+        {
+            label: "Login",
+            action: () => navigate('/login'),
+            primary: true
+        }
+    ];
+
+    const [hidden, setHidden] = useState(false);
+    const { scrollY } = useScroll();
+
+
 
   useMotionValueEvent(scrollY, "change", (latest) => {
     const previous = scrollY.getPrevious();

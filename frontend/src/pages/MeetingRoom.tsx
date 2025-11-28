@@ -27,7 +27,7 @@ import {
   Minimize2,
   Maximize2,
 } from 'lucide-react';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { CosmicStars } from '../components/workspace/CosmicStars';
 
 type Tab = 'code' | 'whiteboard' | 'screen' | 'tasks';
 

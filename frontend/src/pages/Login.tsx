@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Code2, Mail, Lock, Github, Chrome, ArrowRight, Sparkles, Terminal } from 'lucide-react';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { CosmicStars } from '../components/workspace/CosmicStars';
 
 export default function Login() {
   const [email, setEmail] = useState('');

@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { IDEHeader } from './components/workspace/IDEHeader';
-import { IntegrationsSidebar } from './components/workspace/IntegrationsSidebar';
-import { FileExplorer } from './components/workspace/FileExplorer';
-import { EditorTabs } from './components/workspace/EditorTabs';
-import { CodeEditor } from './components/workspace/CodeEditor';
-import { Terminal } from './components/workspace/Terminal';
-import { VideoPanel } from './components/workspace/VideoPanel';
-import { ParticipantsList } from './components/workspace/ParticipantsList';
-import { ChatPanel } from './components/workspace/ChatPanel';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { IDEHeader } from '../components/workspace/IDEHeader';
+import { IntegrationsSidebar } from '../components/workspace/IntegrationsSidebar';
+import { FileExplorer } from '../components/workspace/FileExplorer';
+import { EditorTabs } from '../components/workspace/EditorTabs';
+import { CodeEditor } from '../components/workspace/CodeEditor';
+import { Terminal } from '../components/workspace/Terminal';
+import { VideoPanel } from '../components/workspace/VideoPanel';
+import { ParticipantsList } from '../components/workspace/ParticipantsList';
+import { ChatPanel } from '../components/workspace/ChatPanel';
+import { CosmicStars } from '../components/workspace/CosmicStars';
 
 export default function Workspace() {
   const [fileExplorerOpen, setFileExplorerOpen] = useState(true);

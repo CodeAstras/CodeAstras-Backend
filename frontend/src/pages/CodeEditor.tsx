@@ -1,39 +1,44 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
+import { useParams } from "react-router-dom";
 import { connectWebSocket, sendMessage } from "../services/websocket";
 
-const CodeEditor: React.FC = () => {
-  const [code, setCode] = useState("// Start coding in CodeAstra 🚀");
+export default function CodeEditor() {
+    const { projectId } = useParams();
+    const [code, setCode] = useState("# Start coding in CodeAstras 🚀\n");
 
-  useEffect(() => {
-    // Connect to WebSocket when the component mounts
-    connectWebSocket((msg: string) => {
-      console.log("Received message:", msg);
-    });
-  }, []);
+    useEffect(() => {
+        if (!projectId) return;
 
-  const handleEditorChange = (value: string | undefined) => {
-    const updatedCode = value || ""; // fallback if value is undefined
-    setCode(updatedCode);
-    sendMessage(updatedCode);
-  };
+        // Connect WebSocket room for this project
+        connectWebSocket(projectId, (msg) => {
+            console.log("Incoming code:", msg);
+            setCode(msg);
+        });
+    }, [projectId]);
 
-  return (
-    <div className="min-h-screen bg-black text-white h-[100vh] w-full">
-      <Editor
-        height="100vh"
-        defaultLanguage="javascript"
-        value={code}
-        theme="vs-dark"
-        onChange={handleEditorChange}
-        options={{
-          fontSize: 14,
-          minimap: { enabled: true },
-          automaticLayout: true,
-        }}
-      />
-    </div>
-  );
-};
+    const handleChange = (value: string | undefined) => {
+        const updatedCode = value || "";
+        setCode(updatedCode);
+        sendMessage(projectId!, updatedCode);
+    };
 
-export default CodeEditor;
+    return (
+        <div className="w-full h-screen bg-[#0a0a0f] text-white overflow-hidden">
+            <Editor
+                height="100vh"
+                width="100%"
+                defaultLanguage="python"
+                value={code}
+                theme="vs-dark"
+                onChange={handleChange}
+                options={{
+                    automaticLayout: true,
+                    fontSize: 15,
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                }}
+            />
+        </div>
+    );
+}

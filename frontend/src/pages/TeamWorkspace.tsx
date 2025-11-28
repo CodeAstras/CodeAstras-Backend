@@ -34,7 +34,7 @@ import {
   Activity,
   Database,
 } from 'lucide-react';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { CosmicStars } from '../components/workspace/CosmicStars';
 
 type TabView = 'overview' | 'code' | 'files' | 'tasks' | 'members' | 'docs' | 'settings';
 

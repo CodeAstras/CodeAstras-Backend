@@ -43,7 +43,7 @@ import {
   Edit3,
   Camera,
 } from 'lucide-react';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { CosmicStars } from '../components/workspace/CosmicStars';
 
 type TabView = 'profile' | 'badges' | 'streaks' | 'contributions' | 'settings' | 'preferences';
 

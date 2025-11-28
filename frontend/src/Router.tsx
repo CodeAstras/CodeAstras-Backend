@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import App from './App';
-import Workspace from './Workspace';
+import Workspace from './pages/Workspace';
 
 export default function Router() {
   const [currentPath, setCurrentPath] = useState(window.location.hash.slice(1) || '/');
@@ -14,7 +14,7 @@ export default function Router() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // Make navigation function available globally
+  // Make the navigation function available globally
   (window as any).navigateTo = (path: string) => {
     window.location.hash = path;
     setCurrentPath(path);

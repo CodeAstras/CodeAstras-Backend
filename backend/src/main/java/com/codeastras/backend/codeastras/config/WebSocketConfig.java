@@ -1,4 +1,4 @@
-package com.codeastras.backend.codeastras;
+package com.codeastras.backend.codeastras.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;

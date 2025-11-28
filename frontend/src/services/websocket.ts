@@ -1,32 +1,35 @@
-import {Client, type Message} from "@stomp/stompjs";
+import { Client, Message } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 
 let stompClient: Client | null = null;
 
 export const connectWebSocket = (
-    onMessageReceived: (msg: string) =>
-        void) => {
-    const socket = new SockJS('http://localhost:8080/ws');
+    projectId: string,
+    onMessage: (msg: string) => void
+) => {
+    const socket = new SockJS("http://localhost:8080/ws");
+
     stompClient = new Client({
-        webSocketFactory: () => socket as never,
-        reconnectDelay: 5000,
-        debug: (str) => console.log(str),
+        webSocketFactory: () => socket as any,
+        reconnectDelay: 3000,
     });
 
     stompClient.onConnect = () => {
-        console.log('Connected to WebSocket');
+        console.log("🟢 Connected to WebSocket:", projectId);
 
-        stompClient?.subscribe('/topic/messages', (message: Message) => {
-            onMessageReceived(message.body);
+        stompClient?.subscribe(`/topic/code/${projectId}`, (message: Message) => {
+            onMessage(message.body);
         });
     };
+
     stompClient.activate();
 };
 
-export const sendMessage = (msg: string) => {
-    if(stompClient && stompClient.connected)  {
+export const sendMessage = (projectId: string, code: string) => {
+    if (stompClient && stompClient.connected) {
         stompClient.publish({
-            destination: '/app/chat', body: msg,
+            destination: `/app/code/${projectId}`,
+            body: code,
         });
     }
 };

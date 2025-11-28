@@ -17,12 +17,28 @@ import {
   MessageCircle,
   Settings
 } from 'lucide-react';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { CosmicStars } from '../components/workspace/CosmicStars';
+import { useNavigate } from "react-router-dom";
+import { createProject } from "../services/api";
+
+
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('home');
 
-  // Mock data
+  const navigate = useNavigate();
+
+    const handleStartNewProject = async () => {
+        try {
+            const result = await createProject();
+            navigate(`/editor/${result.projectId}`);
+        } catch (err) {
+            console.error("Failed to create project:", err);
+        }
+    };
+
+
+    // Mock data
   const projects = [
     { id: 1, name: 'E-Commerce API', language: 'TypeScript', lastEdited: '2 hours ago', members: ['A', 'B', 'C'], color: '#7c3aed' },
     { id: 2, name: 'Chat Application', language: 'React', lastEdited: '5 hours ago', members: ['D', 'E'], color: '#0ea5e9' },
@@ -202,10 +218,13 @@ export default function Dashboard() {
                 <Folder className="w-6 h-6 text-[#7c3aed]" />
                 Your Projects
               </h2>
-              <button className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all flex items-center gap-2">
-                <Plus className="w-4 h-4" />
-                New Project
-              </button>
+                <button
+                    onClick={handleStartNewProject}
+                    className="px-4 py-2 bg-white/5 border border-white/10 rounded-lg text-sm hover:bg-white/10 transition-all flex items-center gap-2"
+                >
+                    <Plus className="w-4 h-4" />
+                    New Project
+                </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

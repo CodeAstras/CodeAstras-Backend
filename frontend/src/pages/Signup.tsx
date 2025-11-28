@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Code2, Mail, Lock, User, AtSign, Github, Chrome, ArrowRight, Check, Sparkles, Zap } from 'lucide-react';
-import { CosmicStars } from './components/workspace/CosmicStars';
+import { CosmicStars } from '../components/workspace/CosmicStars';
 
 export default function Signup() {
   const [formData, setFormData] = useState({
