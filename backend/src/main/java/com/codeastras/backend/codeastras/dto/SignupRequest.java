@@ -9,12 +9,7 @@ public class SignupRequest {
     // No-arg constructor required for Jackson
     public SignupRequest() {}
 
-    public SignupRequest(String email, String password) {
-        this.email = email;
-        this.password = password;
-    }
-
-    public String getFullName() {
+     public String getFullName() {
         return fullName;
     }
 

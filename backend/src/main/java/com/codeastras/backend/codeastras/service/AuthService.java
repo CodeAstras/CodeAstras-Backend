@@ -5,9 +5,12 @@ import com.codeastras.backend.codeastras.dto.SignupRequest;
 import com.codeastras.backend.codeastras.entity.User;
 import com.codeastras.backend.codeastras.repository.UserRepository;
 import com.codeastras.backend.codeastras.config.JwtTokenProvider;
+import com.codeastras.backend.codeastras.security.JwtUtils;
+import jakarta.transaction.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,32 +19,34 @@ public class AuthService {
 
     private final UserRepository userRepo;
     private final PasswordEncoder passwordEncoder;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final JwtUtils jwtUtils;
 
-    public AuthService(UserRepository userRepo, PasswordEncoder passwordEncoder, JwtTokenProvider jwtTokenProvider) {
+    public AuthService(UserRepository userRepo, PasswordEncoder passwordEncoder, JwtUtils jwtUtils) {
         this.userRepo = userRepo;
         this.passwordEncoder = passwordEncoder;
-        this.jwtTokenProvider = jwtTokenProvider;
+        this.jwtUtils = jwtUtils;
     }
-
+@Transactional
     public String signup(SignupRequest req) {
-        if (userRepo.existsByEmail(req.getEmail())) {
+        String email = req.getEmail().trim().toLowerCase(Locale.ROOT);
+        String username = req.getUsername().trim();
+        if (userRepo.existsByEmail(email)) {
             throw new IllegalArgumentException("email already in use");
         }
-        if (userRepo.existsByUsername(req.getUsername())) {
+        if (userRepo.existsByUsername(username)) {
             throw new IllegalArgumentException("Username already in use");
         }
         String hashed = passwordEncoder.encode(req.getPassword());
         User user = new User(
-                UUID.randomUUID(),
                 req.getFullName(),
-                req.getUsername(),
-                req.getEmail(),
+                username,
+                email,
                 hashed
         );
 
-        userRepo.save(user);
-        return jwtTokenProvider.generateToken(user.getId());
+         User saved = userRepo.save(user);
+        String token = jwtUtils.generateToken(saved.getId(), saved.getUsername(), saved.getEmail());
+        return token;
     }
 
     public String login(LoginRequest req) {
@@ -53,6 +58,9 @@ public class AuthService {
         if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
             throw new IllegalArgumentException("invalid credentials");
         }
-        return jwtTokenProvider.generateToken(user.getId());
+        return jwtUtils.generateToken(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail());
     }
 }
