@@ -49,7 +49,12 @@ public class SecurityConfig {
                 )
                 .addFilterBefore(jwtFilter,
                         UsernamePasswordAuthenticationFilter.class
-                ).exceptionHandling(ex->ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()));
+                ).exceptionHandling(ex->ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()))
+                .oauth2Login(oauth -> userInfo
+                        .userService(customOAuth2UserService)
+                )
+                .defaultSuccessUrl("/oauth2/success");
+
 
 
         return http.build();
