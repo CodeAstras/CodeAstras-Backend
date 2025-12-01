@@ -4,6 +4,7 @@ import com.codeastras.backend.codeastras.dto.AuthResponse;
 import com.codeastras.backend.codeastras.dto.LoginRequest;
 import com.codeastras.backend.codeastras.dto.SignupRequest;
 import com.codeastras.backend.codeastras.service.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,7 +20,7 @@ public class AuthController {
     }
 
     @PostMapping("/signup")
-    public ResponseEntity<AuthResponse> signup(@RequestBody SignupRequest req) {
+    public ResponseEntity<AuthResponse> signup(@Valid @RequestBody SignupRequest req) {
         String token = authService.signup(req);
         return ResponseEntity.ok(new AuthResponse(token));
     }

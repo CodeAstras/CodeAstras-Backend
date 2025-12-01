@@ -1,6 +1,8 @@
 package com.codeastras.backend.codeastras.entity;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.GenericGenerator;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -9,10 +11,15 @@ import java.util.UUID;
 public class User {
 
     @Id
-    @Column(nullable = false)
+    @GeneratedValue(generator = "UUID")
+    @GenericGenerator(
+            name = "UUID",
+            strategy = "org.hibernate.id.UUIDGenerator"
+    )
+    @Column(name = "id", updatable = false, nullable = false, columnDefinition = "UUID")
     private UUID id;
 
-    @Column(nullable = false)
+    @Column(name = "full_name", nullable = false)
     private String fullName;
 
     @Column(nullable = false, unique = true)
@@ -31,8 +38,7 @@ public class User {
     public User() {}
 
     // Full constructor for creating new users
-    public User(UUID id, String fullName, String username, String email, String passwordHash) {
-        this.id = id;
+    public User(String fullName, String username, String email, String passwordHash) {
         this.fullName = fullName;
         this.username = username;
         this.email = email;
