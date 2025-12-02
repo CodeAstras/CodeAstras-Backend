@@ -1,9 +1,12 @@
 package com.codeastras.backend.codeastras.config;
 
+import com.codeastras.backend.codeastras.security.OAuth2FailureHandler;
+import com.codeastras.backend.codeastras.security.OAuth2SuccessHandler;
+import com.codeastras.backend.codeastras.security.RestAuthenticationEntryPoint;
+import com.codeastras.backend.codeastras.service.CustomOAuth2UserService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -19,9 +22,18 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtTokenProvider tokenProvider;
+    private final CustomOAuth2UserService customOAuth2UserService;
+    private final OAuth2SuccessHandler oauth2SuccessHandler;
+    private final OAuth2FailureHandler oauth2FailureHandler;
 
-    public SecurityConfig(JwtTokenProvider tokenProvider) {
+    public SecurityConfig(JwtTokenProvider tokenProvider,
+                          CustomOAuth2UserService customOAuth2UserService,
+                          OAuth2SuccessHandler oauth2SuccessHandler,
+                          OAuth2FailureHandler oauth2FailureHandler) {
         this.tokenProvider = tokenProvider;
+        this.customOAuth2UserService = customOAuth2UserService;
+        this.oauth2SuccessHandler = oauth2SuccessHandler;
+        this.oauth2FailureHandler = oauth2FailureHandler;
     }
 
     @Bean
@@ -44,18 +56,19 @@ public class SecurityConfig {
                 )
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/oauth2/**").permitAll()   // allow oauth endpoints
                         .requestMatchers("/api/health").permitAll()
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(jwtFilter,
-                        UsernamePasswordAuthenticationFilter.class
-                ).exceptionHandling(ex->ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()))
-                .oauth2Login(oauth -> userInfo
-                        .userService(customOAuth2UserService)
-                )
-                .defaultSuccessUrl("/oauth2/success");
-
-
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()))
+                .oauth2Login(oauth -> oauth
+                        .userInfoEndpoint(userInfo -> userInfo
+                                .userService(customOAuth2UserService)
+                        )
+                        .successHandler(oauth2SuccessHandler)
+                        .failureHandler(oauth2FailureHandler)
+                );
 
         return http.build();
     }
