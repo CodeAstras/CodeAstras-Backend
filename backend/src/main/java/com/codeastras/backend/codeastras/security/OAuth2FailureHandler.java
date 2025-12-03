@@ -12,9 +12,6 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 
-/**
- * On failure, redirect to frontend and include an error message.
- */
 @Component
 public class OAuth2FailureHandler implements AuthenticationFailureHandler {
 
@@ -27,7 +24,8 @@ public class OAuth2FailureHandler implements AuthenticationFailureHandler {
     @Override
     public void onAuthenticationFailure(HttpServletRequest request,
                                         HttpServletResponse response,
-                                        AuthenticationException exception) throws IOException, ServletException {
+                                        AuthenticationException exception)
+            throws IOException {
 
         String message = exception != null ? exception.getMessage() : "OAuth2 authentication failed";
         String encoded = URLEncoder.encode(message, StandardCharsets.UTF_8);
@@ -36,3 +34,4 @@ public class OAuth2FailureHandler implements AuthenticationFailureHandler {
         response.sendRedirect(redirect);
     }
 }
+

@@ -1,87 +1,137 @@
 package com.codeastras.backend.codeastras.security;
 
 import com.codeastras.backend.codeastras.config.OAuth2Config;
-import com.codeastras.backend.codeastras.config.JwtTokenProvider; // adjust import if your JwtTokenProvider is elsewhere
+import com.codeastras.backend.codeastras.entity.RefreshToken;
+import com.codeastras.backend.codeastras.entity.User;
+import com.codeastras.backend.codeastras.repository.RefreshTokenRepository;
+import com.codeastras.backend.codeastras.repository.UserRepository;
+import com.codeastras.backend.codeastras.service.UsernameGenerationService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
+import java.security.MessageDigest;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Creates a JWT for the authenticated local user and redirects to the frontend
- * with the token placed in the URL fragment (recommended for SPA).
- */
 @Component
 public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
 
-    private final JwtTokenProvider jwtTokenProvider;
+    private final UserRepository userRepo;
+    private final RefreshTokenRepository refreshRepo;
+    private final UsernameGenerationService usernameService;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtUtils jwt;
     private final OAuth2Config oauth2Config;
 
-    public OAuth2SuccessHandler(JwtTokenProvider jwtTokenProvider, OAuth2Config oauth2Config) {
-        this.jwtTokenProvider = jwtTokenProvider;
+    public OAuth2SuccessHandler(
+            UserRepository userRepo,
+            RefreshTokenRepository refreshRepo,
+            UsernameGenerationService usernameService,
+            PasswordEncoder passwordEncoder,
+            JwtUtils jwt,
+            OAuth2Config oauth2Config
+    ) {
+        this.userRepo = userRepo;
+        this.refreshRepo = refreshRepo;
+        this.usernameService = usernameService;
+        this.passwordEncoder = passwordEncoder;
+        this.jwt = jwt;
         this.oauth2Config = oauth2Config;
     }
 
     @Override
     public void onAuthenticationSuccess(HttpServletRequest request,
                                         HttpServletResponse response,
-                                        Authentication authentication) throws IOException, ServletException {
+                                        Authentication auth) throws IOException {
 
-        if (authentication == null || !(authentication.getPrincipal() instanceof OAuth2User)) {
-            // fallback: redirect to frontend login
-            response.sendRedirect(oauth2Config.getFrontendOauthSuccessPath());
+        OAuth2AuthenticationToken oauth = (OAuth2AuthenticationToken) auth;
+        OAuth2User oauthUser = oauth.getPrincipal();
+
+        String email = (String) oauthUser.getAttributes().get("email");
+
+        if (email == null || email.isBlank()) {
+            response.sendError(400, "OAuth provider did not supply email");
             return;
         }
 
-        OAuth2User oauthUser = (OAuth2User) authentication.getPrincipal();
-        Map<String, Object> attributes = oauthUser.getAttributes();
+        email = email.toLowerCase(Locale.ROOT);
 
-        // Attempt to read local user id saved by CustomOAuth2UserService
-        String localUserId = getStringAttribute(attributes, "localUserId");
-        String localUsername = getStringAttribute(attributes, "localUsername");
-        String email = getStringAttribute(attributes, "email");
-        if (email == null) {
-            // maybe the attribute uses another key
-            email = getStringAttribute(attributes, "localEmail");
-        }
+        String finalEmail = email;
+        User user = userRepo.findByEmail(email).orElseGet(() -> {
+            String name = Optional.ofNullable((String) oauthUser.getAttributes().get("name"))
+                    .orElse(finalEmail.split("@")[0]);
 
-        String jwt;
-        try {
-            if (localUserId != null) {
-                UUID userId = UUID.fromString(localUserId);
-                jwt = jwtTokenProvider.generateToken(userId, localUsername, email);
-            } else {
-                // If we don't have a localUserId, try to generate token from other attributes
-                // This branch assumes you can still create a token from username/email - adjust as needed
-                // If JwtTokenProvider has a method generateToken(UUID) only, you'll need the user id.
-                // Here we fallback to redirecting to frontend without token.
-                response.sendRedirect(oauth2Config.getFrontendOauthSuccessPath());
-                return;
-            }
-        } catch (Exception ex) {
-            // Something went wrong creating the token - redirect without token
-            response.sendRedirect(oauth2Config.getFrontendOauthSuccessPath());
-            return;
-        }
+            String baseUsername = usernameService.suggestFromNameOrEmail(name, finalEmail);
+            String username = usernameService.generateAvailableUsername(baseUsername);
 
-        // Put token in fragment to avoid it being sent to server in Referer header
-        String redirect = oauth2Config.getFrontendOauthSuccessPath() + "#token=" + URLEncoder.encode(jwt, StandardCharsets.UTF_8);
+            String randomPwd = UUID.randomUUID().toString();
+            String hashed = passwordEncoder.encode(randomPwd);
 
-        response.sendRedirect(redirect);
+            User u = new User(name, username, finalEmail, hashed);
+            return userRepo.save(u);
+        });
+
+        // ---- Refresh Token & DB session ----
+        UUID sessionId = UUID.randomUUID();
+        String refreshJwt = jwt.generateRefreshToken(user.getId(), sessionId.toString());
+
+        RefreshToken rt = new RefreshToken();
+        rt.setId(UUID.randomUUID());
+        rt.setUserId(user.getId());
+        rt.setSessionId(sessionId.toString());
+        rt.setTokenHash(hash(refreshJwt));
+        rt.setCreatedAt(Instant.now());
+        rt.setExpiresAt(Instant.now().plusMillis(jwt.getRefreshExpirationMs()));
+        rt.setRevoked(false);
+        rt.setUserAgent(request.getHeader("User-Agent"));
+        rt.setIp(request.getRemoteAddr());
+        refreshRepo.save(rt);
+
+        // ---- Access Token ----
+        String access = jwt.generateAccessToken(user.getId(), user.getUsername(), user.getEmail());
+
+        // ---- Cookie ----
+        ResponseCookie cookie = ResponseCookie.from("refresh_token", refreshJwt)
+                .httpOnly(true)
+                .secure(false)
+                .path("/")
+                .maxAge(Duration.ofMillis(jwt.getRefreshExpirationMs()))
+                .sameSite("Lax")
+                .build();
+
+        response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+
+        // ---- Redirect to FRONTEND ----
+        String redirectUrl = oauth2Config.getFrontendBaseUrl()
+                + "/oauth-success?access="
+                + URLEncoder.encode(access, StandardCharsets.UTF_8);
+
+        response.sendRedirect(redirectUrl);
     }
 
-    private String getStringAttribute(Map<String, Object> attrs, String key) {
-        Object v = attrs.get(key);
-        if (v == null) return null;
-        return v.toString();
+    private String hash(String input) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return Base64.getEncoder().encodeToString(
+                    digest.digest(input.getBytes(StandardCharsets.UTF_8))
+            );
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

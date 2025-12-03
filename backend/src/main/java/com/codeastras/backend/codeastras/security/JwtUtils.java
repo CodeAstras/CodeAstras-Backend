@@ -11,23 +11,46 @@ import java.util.UUID;
 public class JwtUtils {
 
     private final Key key;
-    private final long jwtExpirationMs;
+    private final long accessExpiryMs;
+    private final long refreshExpiryMs;
 
     public JwtUtils(JwtProperties props) {
         this.key = Keys.hmacShaKeyFor(props.getSecret().getBytes());
-        this.jwtExpirationMs = props.getExpirationMs();
+        this.accessExpiryMs = props.getAccessExpirationMs();
+        this.refreshExpiryMs = props.getRefreshExpirationMs();
     }
 
-    public String generateToken(UUID userId, String username, String email) {
+    // --------------------
+    // ACCESS TOKEN
+    // --------------------
+    public String generateAccessToken(UUID userId, String username, String email) {
         Date now = new Date();
-        Date expiry = new Date(now.getTime() + jwtExpirationMs);
+        Date exp = new Date(now.getTime() + accessExpiryMs);
 
         return Jwts.builder()
                 .setSubject(userId.toString())
                 .claim("username", username)
                 .claim("email", email)
+                .claim("type", "access")
                 .setIssuedAt(now)
-                .setExpiration(expiry)
+                .setExpiration(exp)
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    // --------------------
+    // REFRESH TOKEN
+    // --------------------
+    public String generateRefreshToken(UUID userId, String sessionId) {
+        Date now = new Date();
+        Date exp = new Date(now.getTime() + refreshExpiryMs);
+
+        return Jwts.builder()
+                .setSubject(userId.toString())
+                .claim("sid", sessionId)
+                .claim("type", "refresh")
+                .setIssuedAt(now)
+                .setExpiration(exp)
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
     }
@@ -36,15 +59,33 @@ public class JwtUtils {
         try {
             Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token);
             return true;
-        } catch (JwtException ex) {
-            // log if needed
+        } catch (JwtException e) {
             return false;
         }
     }
 
-    public UUID getUserIdFromToken(String token) {
-        Claims claims = Jwts.parserBuilder().setSigningKey(key).build()
+    public UUID getUserId(String token) {
+        Claims c = Jwts.parserBuilder().setSigningKey(key).build()
                 .parseClaimsJws(token).getBody();
-        return UUID.fromString(claims.getSubject());
+        return UUID.fromString(c.getSubject());
+    }
+
+    public String getSessionId(String token) {
+        Claims c = Jwts.parserBuilder().setSigningKey(key).build()
+                .parseClaimsJws(token).getBody();
+        return c.get("sid", String.class);
+    }
+
+    public boolean isRefreshToken(String token) {
+        Claims c = Jwts.parserBuilder().setSigningKey(key).build()
+                .parseClaimsJws(token).getBody();
+        return "refresh".equals(c.get("type", String.class));
+    }
+
+    // --------------------
+    // NEEDED BY AuthService + OAuth2SuccessHandler
+    // --------------------
+    public long getRefreshExpirationMs() {
+        return refreshExpiryMs;
     }
 }
