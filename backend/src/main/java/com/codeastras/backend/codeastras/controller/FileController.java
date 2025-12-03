@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.UUID;
 
@@ -44,7 +45,7 @@ public class FileController {
             @RequestParam String path,
             @RequestBody String content,
             Authentication authentication
-    ) {
+    ) throws IOException {
         UUID userId = (UUID) authentication.getPrincipal();
         ProjectFile updated = fileService.saveFileContent(projectId, path, content, userId);
         return ResponseEntity.ok(updated);

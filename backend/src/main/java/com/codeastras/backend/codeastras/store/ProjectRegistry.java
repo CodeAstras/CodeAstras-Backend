@@ -1,18 +1,18 @@
 package com.codeastras.backend.codeastras.store;
 
-import com.codeastras.backend.codeastras.Model.ProjectSession;
+import com.codeastras.backend.codeastras.dto.SignupRequest;
 
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ProjectRegistry {
 
-    private static final ConcurrentHashMap<String, ProjectSession> projects = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, SignupRequest.ProjectSession> projects = new ConcurrentHashMap<>();
 
-    public static void add(ProjectSession projectSession) {
+    public static void add(SignupRequest.ProjectSession projectSession) {
         projects.put(projectSession.getProjectId(), projectSession);
     }
 
-    public static ProjectSession get(String projectId) {
+    public static SignupRequest.ProjectSession get(String projectId) {
         return projects.get(projectId);
     }
 

@@ -33,5 +33,9 @@ public class UsernameGenerationService {
 
         return candidate;
     }
+
+    public String suggestFromNameOrEmail(String fullName, String email) {
+        return fullName.replaceAll("\\s+", "_");
+    }
 }
 

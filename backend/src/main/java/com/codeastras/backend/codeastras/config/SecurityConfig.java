@@ -1,12 +1,13 @@
 package com.codeastras.backend.codeastras.config;
 
+import com.codeastras.backend.codeastras.repository.UserRepository;
+import com.codeastras.backend.codeastras.security.*;
+import com.codeastras.backend.codeastras.service.CustomOAuth2UserService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -18,16 +19,34 @@ import java.util.List;
 @Configuration
 public class SecurityConfig {
 
-    private final JwtTokenProvider tokenProvider;
+    private final JwtUtils jwt;
+    private final UserRepository userRepository;
+    private final CustomOAuth2UserService customOAuth2UserService;
 
-    public SecurityConfig(JwtTokenProvider tokenProvider) {
-        this.tokenProvider = tokenProvider;
+    public SecurityConfig(
+            JwtUtils jwt,
+            UserRepository userRepository,
+            CustomOAuth2UserService customOAuth2UserService
+    ) {
+        this.jwt = jwt;
+        this.userRepository = userRepository;
+        this.customOAuth2UserService = customOAuth2UserService;
+    }
+
+    // --- FIX: COOKIE-BASED OAUTH STATE STORAGE ---
+    @Bean
+    public HttpCookieOAuth2AuthorizationRequestRepository oAuth2AuthorizationRequestRepository() {
+        return new HttpCookieOAuth2AuthorizationRequestRepository();
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(
+            HttpSecurity http,
+            OAuth2SuccessHandler oauth2SuccessHandler,
+            OAuth2FailureHandler oauth2FailureHandler
+    ) throws Exception {
 
-        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(tokenProvider);
+        JwtAuthenticationFilter jwtFilter = new JwtAuthenticationFilter(jwt, userRepository);
 
         http
                 .cors(cors -> cors.configurationSource(request -> {
@@ -38,27 +57,28 @@ public class SecurityConfig {
                     cfg.setAllowCredentials(true);
                     return cfg;
                 }))
-                .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session ->
-                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-                )
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers("/oauth2/**", "/login/**").permitAll()
                         .requestMatchers("/api/health").permitAll()
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(jwtFilter,
-                        UsernamePasswordAuthenticationFilter.class
-                ).exceptionHandling(ex->ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()))
-                .oauth2Login(oauth -> userInfo
-                        .userService(customOAuth2UserService)
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()))
+                .oauth2Login(oauth -> oauth
+                        .authorizationEndpoint(a -> a
+                                .authorizationRequestRepository(oAuth2AuthorizationRequestRepository())
+                        )
+                        .userInfoEndpoint(user -> user.userService(customOAuth2UserService))
+                        .successHandler(oauth2SuccessHandler)
+                        .failureHandler(oauth2FailureHandler)
                 )
-                .defaultSuccessUrl("/oauth2/success");
-
-
+                .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
+
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -66,7 +86,8 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
-        return authConfig.getAuthenticationManager();
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration cfg) throws Exception {
+        return cfg.getAuthenticationManager();
     }
+
 }

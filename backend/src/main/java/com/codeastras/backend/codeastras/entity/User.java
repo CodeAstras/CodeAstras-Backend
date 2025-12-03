@@ -34,6 +34,10 @@ public class User {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    private String provider;
+    // "LOCAL", "GITHUB", "GOOGLE"
+    private String providerId;  // provider-specific id
+
     // Required by JPA
     public User() {}
 
@@ -94,5 +98,22 @@ public class User {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
+    }
+
+    public String getProviderId() {
+        return providerId;
+    }
+
+    public void setProviderId(String providerId) {
+        this.providerId = providerId;
+
     }
 }
