@@ -33,10 +33,12 @@ public class RunCodeService {
      */
     public CommandResult runPythonInSession(String sessionId, String filename, int timeoutSeconds) throws Exception {
         // validate session exists
-        var sessionInfo = sessionRegistry.get(sessionId);
-        if (sessionInfo == null) {
+        var sessionInfoOpt = sessionRegistry.get(sessionId);
+        if (sessionInfoOpt.isEmpty()) {
             throw new ResourceNotFoundException("Session not found: " + sessionId);
         }
+        SessionRegistry.SessionInfo sessionInfo = sessionInfoOpt.get();
+
 
         // derive container name (this keeps SessionRegistry simple)
         String containerName = "session_" + sessionId;

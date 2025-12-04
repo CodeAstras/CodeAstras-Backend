@@ -1,5 +1,7 @@
 package com.codeastras.backend.codeastras.controller;
 
+import com.codeastras.backend.codeastras.dto.ProjectFileContentDto;
+import com.codeastras.backend.codeastras.dto.ProjectFileInfoDto;
 import com.codeastras.backend.codeastras.entity.ProjectFile;
 import com.codeastras.backend.codeastras.service.FileService;
 import org.springframework.http.MediaType;
@@ -22,32 +24,72 @@ public class FileController {
         this.fileService = fileService;
     }
 
+    // -------------------------------
+    // Get Entire File Tree
+    // -------------------------------
     @GetMapping("/{projectId}/files")
-    public List<ProjectFile> getProjectFiles(@PathVariable UUID projectId, Authentication authentication) {
-        UUID userId = (UUID) authentication.getPrincipal();
-        return fileService.findAllByProjectId(projectId, userId);
+    public ResponseEntity<List<ProjectFileInfoDto>> getProjectFiles(
+            @PathVariable UUID projectId,
+            Authentication auth
+    ) {
+        UUID userId = (UUID) auth.getPrincipal();
+        List<ProjectFile> files = fileService.findAllByProjectId(projectId, userId);
+
+        return ResponseEntity.ok(
+                files.stream()
+                        .map(ProjectFileInfoDto::from)
+                        .toList()
+        );
     }
 
+    // -------------------------------
+    // Load a Specific File
+    // -------------------------------
     @GetMapping(path ="/{projectId}/file", produces = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<ProjectFile> getFile (
+    public ResponseEntity<ProjectFileContentDto> getFile(
             @PathVariable UUID projectId,
             @RequestParam String path,
-            Authentication authentication
+            Authentication auth
     ) {
-        UUID userId = (UUID) authentication.getPrincipal();
+        validatePath(path);
+
+        UUID userId = (UUID) auth.getPrincipal();
         ProjectFile file = fileService.getFile(projectId, path, userId);
-        return ResponseEntity.ok(file);
+
+        return ResponseEntity.ok(ProjectFileContentDto.from(file));
     }
 
+    // -------------------------------
+    // Save File Content
+    // -------------------------------
     @PutMapping("/{projectId}/file")
-    public ResponseEntity<ProjectFile> saveFile(
+    public ResponseEntity<ProjectFileContentDto> saveFile(
             @PathVariable UUID projectId,
             @RequestParam String path,
             @RequestBody String content,
-            Authentication authentication
+            Authentication auth
     ) throws IOException {
-        UUID userId = (UUID) authentication.getPrincipal();
+
+        validatePath(path);
+
+        UUID userId = (UUID) auth.getPrincipal();
         ProjectFile updated = fileService.saveFileContent(projectId, path, content, userId);
-        return ResponseEntity.ok(updated);
+
+        return ResponseEntity.ok(ProjectFileContentDto.from(updated));
+    }
+
+    // -------------------------------
+    // Validation Helper
+    // -------------------------------
+    private void validatePath(String path) {
+        if (path.startsWith("/") || path.startsWith("\\")) {
+            throw new IllegalArgumentException("Path cannot start with slash");
+        }
+        if (path == null || path.isBlank()) {
+            throw new IllegalArgumentException("Path cannot be empty");
+        }
+        if (path.contains("..")) {
+            throw new IllegalArgumentException("Invalid path");
+        }
     }
 }

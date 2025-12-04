@@ -91,6 +91,11 @@ public class FileSyncService {
     private Path resolvePathSafely(Path sessionDir, String userPath) {
         // normalize userPath
         String cleaned = userPath == null ? "main.py" : userPath;
+
+        if (userPath.contains("..") || userPath.contains("\\")) {
+            throw new IllegalArgumentException("Invalid path");
+        }
+
         // remove leading slashes
         if (cleaned.startsWith("/")) cleaned = cleaned.substring(1);
         // prevent .. segments
