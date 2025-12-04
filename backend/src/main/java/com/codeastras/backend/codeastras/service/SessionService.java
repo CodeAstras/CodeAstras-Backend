@@ -55,7 +55,8 @@ public class SessionService {
                 "docker", "run", "-d",
                 "--name", containerName,
                 "-v", "/var/code_sessions/" + sessionId + ":/workspace",
-                dockerImage
+                dockerImage,
+                "tail", "-f", "/dev/null"
         );
 
         // Register with proper UUIDs
