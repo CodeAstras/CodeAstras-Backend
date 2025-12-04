@@ -41,9 +41,10 @@ public class ProjectController {
         return ResponseEntity.ok(response);
     }
 
-//    @GetMapping
-//    public List<Project> getMyProjects(Authentication auth) {
-//        UUID userId = (UUID) auth.getPrincipal();
-//        return projectService.findByOwnerId(userId);
-//    }
+    @GetMapping
+    public List<ProjectResponse> getMyProjects(Authentication auth) {
+        UUID userId = (UUID) auth.getPrincipal();
+        return projectService.getProjectsForUser(userId);
+    }
+
 }

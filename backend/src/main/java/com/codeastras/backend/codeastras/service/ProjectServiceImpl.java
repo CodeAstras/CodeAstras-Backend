@@ -112,4 +112,22 @@ public class ProjectServiceImpl implements ProjectService {
 
         return files;
     }
+
+    @Override
+    public List<ProjectResponse> getProjectsForUser(UUID ownerId) {
+
+        List<Project> projects = projectRepository.findByOwnerId(ownerId);
+
+        return projects.stream()
+                .map(project -> {
+                    var files = projectFileRepository.findByProjectId(project.getId());
+
+                    String activeSessionId = sessionRegistry
+                            .getSessionIdForProject(project.getId())
+                            .orElse(null);
+
+                    return ProjectResponse.from(project, files, activeSessionId);
+                })
+                .toList();
+    }
 }
