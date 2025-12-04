@@ -58,4 +58,13 @@ public class SessionRegistry {
             projectToSession.remove(info.projectId);
         }
     }
+
+    public SessionInfo getByProject(UUID projectId) {
+        return sessions.values()
+                .stream()
+                .filter(s -> s.projectId.equals(projectId))
+                .findFirst()
+                .orElse(null);
+    }
+
 }
