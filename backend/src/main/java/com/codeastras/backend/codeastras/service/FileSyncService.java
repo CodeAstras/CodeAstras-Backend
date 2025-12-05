@@ -19,7 +19,6 @@ public class FileSyncService {
     private final Logger log = LoggerFactory.getLogger(FileSyncService.class);
 
     private final ProjectFileRepository fileRepo;
-
     private final Path basePath;
 
     public FileSyncService(ProjectFileRepository fileRepo,
@@ -28,81 +27,107 @@ public class FileSyncService {
         this.basePath = Paths.get(basePath).toAbsolutePath().normalize();
     }
 
+    // SYNC FULL PROJECT INTO A SESSION DIRECTORY
     public void syncProjectToSession(UUID projectId, String sessionId) throws IOException {
         Path sessionDir = getSessionDir(sessionId);
+        log.info("Syncing project {} → session {}", projectId, sessionDir);
 
-        log.info("Syncing project {} -> to session {}", projectId, sessionDir);
         Files.createDirectories(sessionDir);
 
         List<ProjectFile> files = fileRepo.findByProjectId(projectId);
 
-        for(ProjectFile f : files) {
-            if("FOLDER".equalsIgnoreCase(f.getType())) {
-                Path dir = resolvePathSafely(sessionDir, f.getPath());
-                Files.createDirectories(dir);
-            } else {
-                Path file = resolvePathSafely(sessionDir, f.getPath());
-                if(file.getParent() != null) {
-                    Files.createDirectories(file.getParent());
-                }
-                String content = f.getContent() == null ? "" : f.getContent();
-                Files.writeString(file, content, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        for (ProjectFile f : files) {
+
+            Path resolved = resolvePathSafely(sessionDir, f.getPath());
+
+            if ("FOLDER".equalsIgnoreCase(f.getType())) {
+                Files.createDirectories(resolved);
+                continue;
             }
+
+            if (resolved.getParent() != null) {
+                Files.createDirectories(resolved.getParent());
+            }
+
+            String content = f.getContent() == null ? "" : f.getContent();
+
+            Files.writeString(
+                    resolved,
+                    content,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
         }
     }
 
+
+    // WRITE A SINGLE FILE INTO THE SESSION
     public void writeFileToSession(String sessionId, String path, String content) throws IOException {
         Path sessionDir = getSessionDir(sessionId);
-        Path filePath = resolvePathSafely(sessionDir, path);
+        Path resolved = resolvePathSafely(sessionDir, path);
 
-        if(filePath.getParent() != null) {
-            Files.createDirectories(filePath.getParent());
+        if (resolved.getParent() != null) {
+            Files.createDirectories(resolved.getParent());
         }
-        Files.writeString(filePath, content == null ? "" : content, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
-        log.debug("Wrote file {} to session {}", filePath, sessionId);
+
+        Files.writeString(
+                resolved,
+                content == null ? "" : content,
+                StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING
+        );
+
+        log.debug("✍ Updated file {} in session {}", resolved, sessionId);
     }
 
+    // DELETE SESSION FOLDER
     public void removeSessionFolder(String sessionId) throws IOException {
-        Path sessionDir = getSessionDir(sessionId);
-        if(Files.exists(sessionDir)) {
-            log.info("Deleting session folder {}", sessionDir);
+        Path dir = getSessionDir(sessionId);
 
-            Files.walk(sessionDir)
-                    .sorted((a, b) -> b.compareTo(a))
-                    .forEach(p -> {
-                        try {
-                            Files.deleteIfExists(p);
-                        } catch (IOException e) {
-                            log.warn("Failed to delete file {}", p);
-                        }
-                    });
-        }
+        if (!Files.exists(dir)) return;
+
+        log.info("🗑 Removing session folder {}", dir);
+
+        Files.walk(dir)
+                .sorted((a, b) -> b.compareTo(a)) // delete deepest/files first
+                .forEach(path -> {
+                    try {
+                        Files.deleteIfExists(path);
+                    } catch (IOException e) {
+                        log.warn("Could not delete {}", path);
+                    }
+                });
     }
 
-    /** helper: session dir path */
+
+    // HELPER: GET SESSION DIRECTORY
     private Path getSessionDir(String sessionId) {
         return basePath.resolve(sessionId).toAbsolutePath().normalize();
     }
 
-    /**
-     * Resolve a user-provided path safely under the session directory.
-     * Prevents path traversal outside sessionDir.
-     */
+    // HELPER: SAFE PATH RESOLUTION
     private Path resolvePathSafely(Path sessionDir, String userPath) {
-        // normalize userPath
-        String cleaned = userPath == null ? "main.py" : userPath;
 
-        if (userPath.contains("..") || userPath.contains("\\")) {
+        String cleaned = (userPath == null || userPath.isBlank()) ? "main.py" : userPath;
+
+        // Check AFTER cleaning
+        if (cleaned.contains("..") || cleaned.contains("\\")) {
             throw new IllegalArgumentException("Invalid path");
         }
 
-        // remove leading slashes
-        if (cleaned.startsWith("/")) cleaned = cleaned.substring(1);
-        // prevent .. segments
-        Path target = sessionDir.resolve(cleaned).normalize();
-        if (!target.startsWith(sessionDir)) {
-            throw new IllegalArgumentException("Invalid path (path traversal detected): " + userPath);
+        if (cleaned.startsWith("/")) {
+            cleaned = cleaned.substring(1);
         }
+
+        Path target = sessionDir.resolve(cleaned).normalize();
+
+        if (!target.startsWith(sessionDir)) {
+            throw new IllegalArgumentException("Invalid path traversal");
+        }
+
         return target;
     }
+
 }
