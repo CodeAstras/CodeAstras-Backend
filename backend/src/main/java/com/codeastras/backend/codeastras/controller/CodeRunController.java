@@ -4,6 +4,8 @@ import com.codeastras.backend.codeastras.dto.CommandResult;
 import com.codeastras.backend.codeastras.dto.RunCodeBroadcastMessage;
 import com.codeastras.backend.codeastras.dto.RunCodeRequestWS;
 import com.codeastras.backend.codeastras.exception.ForbiddenException;
+import com.codeastras.backend.codeastras.security.JwtProperties;
+import com.codeastras.backend.codeastras.security.JwtUtils;
 import com.codeastras.backend.codeastras.service.RunCodeService;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -19,15 +21,17 @@ public class CodeRunController {
     private final RunCodeService runCodeService;
     private final SessionRegistry sessionRegistry;
     private final SimpMessagingTemplate messagingTemplate;
+    private final JwtUtils jwtUtils;
 
     public CodeRunController(
             RunCodeService runCodeService,
             SessionRegistry sessionRegistry,
-            SimpMessagingTemplate messagingTemplate
+            SimpMessagingTemplate messagingTemplate, JwtUtils jwtUtils
     ) {
         this.runCodeService = runCodeService;
         this.sessionRegistry = sessionRegistry;
         this.messagingTemplate = messagingTemplate;
+        this.jwtUtils = jwtUtils;
     }
 
     /**
@@ -42,19 +46,22 @@ public class CodeRunController {
             RunCodeRequestWS msg
     ) throws Exception {
 
-        String triggeredBy = msg.getUserId();
-        String filename = msg.getFilename();
+        // Validate token
+        if (msg.getToken() == null || !jwtUtils.validate(msg.getToken())) {
+            throw new ForbiddenException("Invalid or missing WS token");
+        }
+
+        UUID userId = jwtUtils.getUserId(msg.getToken());
 
         if (!msg.getProjectId().equals(projectId.toString())) {
             throw new ForbiddenException("Invalid projectId in WS message");
         }
 
-        // find active session for this project
         var sessionInfo = sessionRegistry.getByProject(projectId);
         if (sessionInfo == null) {
             messagingTemplate.convertAndSend(
                     "/topic/project/" + projectId + "/run-output",
-                    new RunCodeBroadcastMessage("No active session", -1, triggeredBy)
+                    new RunCodeBroadcastMessage("No active session", -1, userId.toString())
             );
             return;
         }
@@ -62,31 +69,21 @@ public class CodeRunController {
         try {
             CommandResult result = runCodeService.runPythonInSession(
                     sessionInfo.sessionId,
-                    filename,
+                    msg.getFilename(),
                     msg.getTimeoutSeconds()
             );
 
-            RunCodeBroadcastMessage outgoing =
-                    new RunCodeBroadcastMessage(
-                            result.getOutput(),
-                            result.getExitCode(),
-                            triggeredBy
-                    );
-
             messagingTemplate.convertAndSend(
                     "/topic/project/" + projectId + "/run-output",
-                    outgoing
+                    new RunCodeBroadcastMessage(result.getOutput(), result.getExitCode(), userId.toString())
             );
 
         } catch (Exception e) {
             messagingTemplate.convertAndSend(
                     "/topic/project/" + projectId + "/run-output",
-                    new RunCodeBroadcastMessage(
-                            "Error executing run: " + e.getMessage(),
-                            -1,
-                            triggeredBy
-                    )
+                    new RunCodeBroadcastMessage("Error executing run: " + e.getMessage(), -1, userId.toString())
             );
         }
     }
+
 }

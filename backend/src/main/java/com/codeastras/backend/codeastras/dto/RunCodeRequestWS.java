@@ -5,6 +5,7 @@ public class RunCodeRequestWS {
     private String userId;
     private String filename;
     private int timeoutSeconds = 10;
+    private String token;
 
     public RunCodeRequestWS() {}
 
@@ -19,4 +20,7 @@ public class RunCodeRequestWS {
 
     public int getTimeoutSeconds() { return timeoutSeconds; }
     public void setTimeoutSeconds(int timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+
+    public String getToken() { return token; }
+    public void setToken(String token) { this.token = token; }
 }

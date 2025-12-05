@@ -5,6 +5,7 @@ public class CodeEditMessage {
     private String userId;
     private String path;
     private String content;
+    private String token;
 
     public CodeEditMessage() {}
 
@@ -19,5 +20,8 @@ public class CodeEditMessage {
 
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
+
+    public String getToken() { return token; }
+    public void setToken(String token) { this.token = token; }
 }
 

@@ -51,20 +51,24 @@ public class SecurityConfig {
         http
                 .cors(cors -> cors.configurationSource(request -> {
                     var cfg = new org.springframework.web.cors.CorsConfiguration();
-                    cfg.setAllowedOrigins(List.of("http://localhost:3000"));
-                    cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+
+                    cfg.setAllowedOriginPatterns(List.of("http://localhost:3000"));
+                    cfg.setAllowedMethods(List.of("*"));
                     cfg.setAllowedHeaders(List.of("*"));
                     cfg.setAllowCredentials(true);
+
                     return cfg;
                 }))
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/oauth2/**", "/login/**").permitAll()
-                        .requestMatchers("/ws/**").permitAll()          // SockJS/STOMP handshake (/ws, /ws/info, etc.)
-                        .requestMatchers("/ws/signal/**").permitAll()
+                        .requestMatchers("/oauth2/**", "/login/**").permitAll() // SockJS/STOMP handshake (/ws, /ws/info, etc.)
                         .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/ws/**").permitAll()
+                        .requestMatchers("/ws/info").permitAll()
+                        .requestMatchers("/ws/info/**").permitAll()
+
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new RestAuthenticationEntryPoint()))
