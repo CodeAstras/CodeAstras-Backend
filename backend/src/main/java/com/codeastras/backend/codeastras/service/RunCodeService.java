@@ -15,7 +15,6 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -36,40 +35,58 @@ public class RunCodeService {
     }
 
     /**
-     * Run python <filename> in the container associated with sessionId.
-     *
-     * Now validates that the caller (userId) is an accepted member of the project which owns the session.
+     * Sanitize a path like "src/main.py" so it is safe to execute inside the container.
+     * We DO NOT modify the folder structure. We only forbid traversal or invalid characters.
+     */
+    private String sanitizePath(String path) {
+        if (path == null || path.isBlank()) {
+            return "main.py";  // fallback
+        }
+
+        // Prevent path traversal
+        if (path.contains("..")) {
+            return "main.py";
+        }
+
+        // Remove leading slash
+        if (path.startsWith("/") || path.startsWith("\\")) {
+            path = path.substring(1);
+        }
+
+        return path.replaceAll("[\\r\\n\0]", "");
+    }
+
+    /**
+     * Run python <filename> inside the container bound to this session.
      */
     public CommandResult runPythonInSession(String sessionId, String filename, int timeoutSeconds, UUID userId) throws Exception {
-        // validate session exists
+
         var sessionInfoOpt = sessionRegistry.get(sessionId);
         if (sessionInfoOpt.isEmpty()) {
             throw new ResourceNotFoundException("Session not found: " + sessionId);
         }
-        SessionRegistry.SessionInfo sessionInfo = sessionInfoOpt.get();
 
+        SessionRegistry.SessionInfo sessionInfo = sessionInfoOpt.get();
         UUID projectId = sessionInfo.projectId;
 
-        // permission check: user must be owner or accepted collaborator for the project
+        // Only collaborators or owners can run code
         boolean allowed = collaboratorRepo.existsByProjectIdAndUserIdAndStatus(projectId, userId, CollaboratorStatus.ACCEPTED);
-
         if (!allowed) {
-            throw new ForbiddenException("You are not authorized to run code in this project's session");
+            throw new ForbiddenException("You are not authorized to run code in this project");
         }
 
-        // derive container name
         String containerName = "session_" + sessionId;
+        String safeFilename = sanitizePath(filename);
 
-        String safeFilename = sanitizeFilename(filename);
+        log.warn("RUN REQUEST FILENAME FROM FE = '{}'", filename);
+        log.info("Executing in {}: python3 {}", containerName, safeFilename);
 
         List<String> cmd = new ArrayList<>();
         cmd.add("docker");
         cmd.add("exec");
         cmd.add(containerName);
-        cmd.add("python");
-        cmd.add(safeFilename);
-
-        log.info("Executing in {}: python {}", containerName, safeFilename);
+        cmd.add("python3");             // run python 3 explicitly
+        cmd.add(safeFilename);          // run src/main.py, not main.py
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
@@ -81,9 +98,9 @@ public class RunCodeService {
 
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
 
-            // read all available output
+            // FIXED: proper output reading loop
             String line;
-            while (reader.ready() && (line = reader.readLine()) != null) {
+            while ((line = reader.readLine()) != null) {
                 appendWithLimit(output, line + "\n");
             }
 
@@ -96,14 +113,11 @@ public class RunCodeService {
                 exitCode = process.exitValue();
             }
 
+            // 🔥 IMPORTANT DIAGNOSTIC LOGS
+            log.warn("PYTHON OUTPUT = {}", output.toString());
+            log.warn("EXIT CODE = {}", exitCode);
+
             return new CommandResult(exitCode, output.toString());
-        } catch (InterruptedException ie) {
-            process.destroyForcibly();
-            Thread.currentThread().interrupt();
-            throw ie;
-        } catch (Exception ex) {
-            if (process != null) process.destroyForcibly();
-            throw ex;
         }
     }
 
@@ -117,15 +131,5 @@ public class RunCodeService {
         } else {
             sb.append(s);
         }
-    }
-
-    private String sanitizeFilename(String filename) {
-        if (filename == null || filename.isBlank()) return "main.py";
-        String cleaned = filename;
-        if (cleaned.startsWith("/") || cleaned.startsWith("\\")) cleaned = cleaned.substring(1);
-        cleaned = cleaned.replace("..", "");
-        if (!cleaned.endsWith(".py")) cleaned = cleaned + ".py";
-        cleaned = cleaned.replaceAll("[\\r\\n\0]", "");
-        return cleaned;
     }
 }
