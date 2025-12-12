@@ -27,9 +27,6 @@ public class SessionController {
         this.sessionRegistry = sessionRegistry;
     }
 
-    // -------------------------------
-    // Start Session
-    // -------------------------------
     @PostMapping("/{projectId}/start")
     public String start(@PathVariable UUID projectId, Authentication auth) throws Exception {
 
@@ -38,32 +35,18 @@ public class SessionController {
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
 
-        if (!project.getOwnerId().equals(userId)) {
+        if (!project.getOwner().getId().equals(userId)) {
             throw new ForbiddenException("You cannot start a session for this project");
         }
 
         return sessionService.startSession(projectId, userId);
     }
 
-    // -------------------------------
-    // Stop Session
-    // -------------------------------
     @PostMapping("/{sessionId}/stop")
     public void stop(@PathVariable String sessionId, Authentication auth) throws Exception {
 
         UUID userId = (UUID) auth.getPrincipal();
 
-        var infoOpt = sessionRegistry.get(sessionId);
-        if (infoOpt.isEmpty()) {
-            return;
-        }
-
-        var info = infoOpt.get();
-
-        if (!info.userId.equals(userId)) {
-            throw new ForbiddenException("You cannot stop another user's session");
-        }
-
-        sessionService.stopSession(sessionId);
+        sessionService.stopSession(sessionId, userId);
     }
 }

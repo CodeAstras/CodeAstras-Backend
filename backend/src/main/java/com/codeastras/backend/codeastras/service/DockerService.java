@@ -3,6 +3,8 @@ package com.codeastras.backend.codeastras.service;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.List;
 
 @Service
@@ -23,15 +25,24 @@ public class DockerService {
                 imageName
         );
 
-        Process p = new ProcessBuilder(cmd).start();
-        p.waitFor();
+        ProcessBuilder pb = new ProcessBuilder(cmd);
+        pb.redirectErrorStream(true);
+        Process p = pb.start();
 
-        return p.exitValue();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                output.append(line).append("\n");
+            }
+        }
+
+        int exit = p.waitFor();
+        if (exit != 0) {
+            throw new RuntimeException("Docker run failed (exit " + exit + "): " + output.toString());
+        }
+
+        return exit;
     }
 
-    public int stopContainer(String containerName) throws Exception {
-        Process p = new ProcessBuilder("docker", "rm", "-f", containerName).start();
-        p.waitFor();
-        return p.exitValue();
-    }
 }

@@ -1,4 +1,7 @@
 package com.codeastras.backend.codeastras.entity;
 
-public class CollaboratorStatus {
+public enum CollaboratorStatus {
+    PENDING,
+    ACCEPTED,
+    REJECTED
 }

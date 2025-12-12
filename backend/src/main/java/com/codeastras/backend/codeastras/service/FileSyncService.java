@@ -25,7 +25,13 @@ public class FileSyncService {
                            @Value("${code.runner.base-path:/var/code_sessions}") String basePath) {
         this.fileRepo = fileRepo;
         this.basePath = Paths.get(basePath).toAbsolutePath().normalize();
+        try {
+            Files.createDirectories(this.basePath);
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to create session base path: " + this.basePath, e);
+        }
     }
+
 
     // SYNC FULL PROJECT INTO A SESSION DIRECTORY
     public void syncProjectToSession(UUID projectId, String sessionId) throws IOException {

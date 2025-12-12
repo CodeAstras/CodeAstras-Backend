@@ -1,4 +1,7 @@
 package com.codeastras.backend.codeastras.entity;
 
-public class CollaboratorRole {
+public enum CollaboratorRole {
+    OWNER,
+    COLLABORATOR,
+    VIEWER
 }

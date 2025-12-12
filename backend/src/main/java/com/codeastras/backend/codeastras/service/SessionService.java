@@ -1,10 +1,10 @@
 package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.entity.Project;
+import com.codeastras.backend.codeastras.exception.ForbiddenException;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.ProjectRepository;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
-import com.codeastras.backend.codeastras.store.SessionRegistry.SessionInfo;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -20,8 +20,12 @@ public class SessionService {
     private final FileSyncService fileSyncService;
     private final SessionRegistry sessionRegistry;
 
+    @Value("${code.runner.base-path}")
+    private String sessionBasePath;
+
     @Value("${code.runner.image-name:py-collab-runner}")
     private String dockerImage;
+
 
     public SessionService(ProjectRepository projectRepo,
                           FileSyncService fileSyncService,
@@ -31,65 +35,62 @@ public class SessionService {
         this.sessionRegistry = sessionRegistry;
     }
 
-    /** Start a coding session (one container per project) */
     public String startSession(UUID projectId, UUID userId) throws Exception {
 
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
 
-        // Check if there is already a session
+        // Only OWNER can start a session
+        if (!project.getOwner().getId().equals(userId)) {
+            throw new ForbiddenException("Only project owner can start a session");
+        }
+
         Optional<String> existing = sessionRegistry.getSessionIdForProject(projectId);
         if (existing.isPresent()) {
             return existing.get();
         }
 
-        // Create new session
         String sessionId = UUID.randomUUID().toString();
         String containerName = "session_" + sessionId;
 
-        // Sync DB files into /workspace for this session
         fileSyncService.syncProjectToSession(projectId, sessionId);
 
-        // Start Docker container
+        String hostPath = toDockerPath(sessionBasePath + "/" + sessionId);
+
         runCommand(
                 "docker", "run", "-d",
                 "--name", containerName,
-                "-v", "/var/code_sessions/" + sessionId + ":/workspace",
+                "-v", hostPath + ":/workspace",
                 dockerImage,
                 "tail", "-f", "/dev/null"
         );
 
-        // Register with proper UUIDs
-        SessionInfo info = new SessionInfo(
-                sessionId,
-                containerName,
-                projectId,
-                userId
-        );
 
-        sessionRegistry.register(info);
+        // Store who created the session
+        sessionRegistry.register(projectId, sessionId, containerName, userId);
 
         return sessionId;
     }
 
-    /** Stop container + remove session */
-    public void stopSession(String sessionId) throws Exception {
-        Optional<SessionInfo> infoOpt = sessionRegistry.get(sessionId);
+    public void stopSession(String sessionId, UUID requesterId) throws Exception {
+
+        var infoOpt = sessionRegistry.get(sessionId);
         if (infoOpt.isEmpty()) return;
 
-        SessionInfo info = infoOpt.get();
+        var info = infoOpt.get();
 
-        // Stop container
-        runCommand("docker", "rm", "-f", info.containerName);
+        // Only session creator can stop session
+        if (!info.getOwnerUserId().equals(requesterId)) {
+            throw new ForbiddenException("You cannot stop this session");
+        }
 
-        // Delete session folder
-        fileSyncService.removeSessionFolder(sessionId);
+        runCommand("docker", "rm", "-f", info.getContainerName());
 
-        // Remove registry
+        fileSyncService.removeSessionFolder(info.getSessionId());
+
         sessionRegistry.remove(sessionId);
     }
 
-    /** Utility to run system commands */
     private String runCommand(String... cmd) throws Exception {
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
@@ -105,10 +106,25 @@ public class SessionService {
 
         int exit = p.waitFor();
         if (exit != 0) {
-            throw new RuntimeException("Command failed: " + String.join(" ", cmd) +
-                    "\nOutput: " + output);
+            throw new RuntimeException(
+                    "Command failed: " + String.join(" ", cmd) +
+                            "\nOutput:\n" + output
+            );
         }
 
         return output.toString();
     }
+
+    private String toDockerPath(String path) {
+        if (System.getProperty("os.name").toLowerCase().contains("win")) {
+            // Convert "C:\Users\Name\path" → "/c/Users/Name/path"
+            path = path.replace("\\", "/");
+            if (path.length() >= 2 && path.charAt(1) == ':') {
+                char drive = Character.toLowerCase(path.charAt(0));
+                return "/" + drive + path.substring(2);
+            }
+        }
+        return path; // Linux/Mac unchanged
+    }
+
 }

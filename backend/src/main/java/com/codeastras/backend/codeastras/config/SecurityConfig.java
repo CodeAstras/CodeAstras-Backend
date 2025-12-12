@@ -65,6 +65,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/oauth2/**", "/login/**").permitAll() // SockJS/STOMP handshake (/ws, /ws/info, etc.)
                         .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/ws").permitAll()
                         .requestMatchers("/ws/**").permitAll()
                         .requestMatchers("/ws/info").permitAll()
                         .requestMatchers("/ws/info/**").permitAll()

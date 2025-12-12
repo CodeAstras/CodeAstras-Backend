@@ -1,7 +1,10 @@
 package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.dto.CommandResult;
+import com.codeastras.backend.codeastras.entity.CollaboratorStatus;
+import com.codeastras.backend.codeastras.exception.ForbiddenException;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
+import com.codeastras.backend.codeastras.repository.ProjectCollaboratorRepository;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +15,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -19,19 +24,23 @@ public class RunCodeService {
 
     private final Logger log = LoggerFactory.getLogger(RunCodeService.class);
     private final SessionRegistry sessionRegistry;
+    private final ProjectCollaboratorRepository collaboratorRepo;
 
     @Value("${code.runner.max-output-bytes:131072}") // 128KB
     private int maxOutputBytes;
 
-    public RunCodeService(SessionRegistry sessionRegistry) {
+    public RunCodeService(SessionRegistry sessionRegistry,
+                          ProjectCollaboratorRepository collaboratorRepo) {
         this.sessionRegistry = sessionRegistry;
+        this.collaboratorRepo = collaboratorRepo;
     }
 
     /**
      * Run python <filename> in the container associated with sessionId.
-     * Uses container name "session_{sessionId}" so SessionRegistry only needs sessionId.
+     *
+     * Now validates that the caller (userId) is an accepted member of the project which owns the session.
      */
-    public CommandResult runPythonInSession(String sessionId, String filename, int timeoutSeconds) throws Exception {
+    public CommandResult runPythonInSession(String sessionId, String filename, int timeoutSeconds, UUID userId) throws Exception {
         // validate session exists
         var sessionInfoOpt = sessionRegistry.get(sessionId);
         if (sessionInfoOpt.isEmpty()) {
@@ -39,8 +48,16 @@ public class RunCodeService {
         }
         SessionRegistry.SessionInfo sessionInfo = sessionInfoOpt.get();
 
+        UUID projectId = sessionInfo.projectId;
 
-        // derive container name (this keeps SessionRegistry simple)
+        // permission check: user must be owner or accepted collaborator for the project
+        boolean allowed = collaboratorRepo.existsByProjectIdAndUserIdAndStatus(projectId, userId, CollaboratorStatus.ACCEPTED);
+
+        if (!allowed) {
+            throw new ForbiddenException("You are not authorized to run code in this project's session");
+        }
+
+        // derive container name
         String containerName = "session_" + sessionId;
 
         String safeFilename = sanitizeFilename(filename);

@@ -9,6 +9,14 @@ public class CodeEditMessage {
 
     public CodeEditMessage() {}
 
+    public CodeEditMessage(String projectId, String userId, String path, String content, String token) {
+        this.projectId = projectId;
+        this.userId = userId;
+        this.path = path;
+        this.content = content;
+        this.token = token;
+    }
+
     public String getProjectId() { return projectId; }
     public void setProjectId(String projectId) { this.projectId = projectId; }
 

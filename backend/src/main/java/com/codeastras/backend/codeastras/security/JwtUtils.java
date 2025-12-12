@@ -1,8 +1,14 @@
 package com.codeastras.backend.codeastras.security;
 
+import com.codeastras.backend.codeastras.entity.User;
+import com.codeastras.backend.codeastras.exception.UnauthorizedException;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
+
 import java.security.Key;
 import java.util.Date;
 import java.util.UUID;
@@ -20,9 +26,9 @@ public class JwtUtils {
         this.refreshExpiryMs = props.getRefreshExpirationMs();
     }
 
-    // --------------------
-    // ACCESS TOKEN
-    // --------------------
+    // ===========================
+    //   GENERATING TOKENS
+    // ===========================
     public String generateAccessToken(UUID userId, String username, String email) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + accessExpiryMs);
@@ -38,9 +44,6 @@ public class JwtUtils {
                 .compact();
     }
 
-    // --------------------
-    // REFRESH TOKEN
-    // --------------------
     public String generateRefreshToken(UUID userId, String sessionId) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + refreshExpiryMs);
@@ -55,6 +58,9 @@ public class JwtUtils {
                 .compact();
     }
 
+    // ===========================
+    //   VALIDATION
+    // ===========================
     public boolean validate(String token) {
         try {
             Jwts.parserBuilder().setSigningKey(key).build().parseClaimsJws(token);
@@ -64,12 +70,59 @@ public class JwtUtils {
         }
     }
 
-    public UUID getUserId(String token) {
-        Claims c = Jwts.parserBuilder().setSigningKey(key).build()
-                .parseClaimsJws(token).getBody();
-        return UUID.fromString(c.getSubject());
+    // ===========================
+    //   GET USER FROM HTTP SECURITY CONTEXT
+    // ===========================
+    public UUID getUserId() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) throw new UnauthorizedException("User not authenticated");
+
+        Object principal = auth.getPrincipal();
+
+        if (principal instanceof User user) {
+            return user.getId();
+        }
+
+        if (principal instanceof UUID id) {
+            return id;
+        }
+
+        if (principal instanceof String s) {
+            try {
+                return UUID.fromString(s);
+            } catch (Exception ignored) {}
+        }
+
+        if (principal instanceof UserDetails ud) {
+            try {
+                return UUID.fromString(ud.getUsername());
+            } catch (Exception ignored) {}
+        }
+
+        throw new UnauthorizedException("Unable to extract user ID from principal");
     }
 
+    // ===========================
+    //   GET USER FROM TOKEN (WS USE-CASE)
+    // ===========================
+    public UUID getUserId(String token) {
+        try {
+            Claims claims = Jwts.parserBuilder()
+                    .setSigningKey(key)
+                    .build()
+                    .parseClaimsJws(token)
+                    .getBody();
+
+            return UUID.fromString(claims.getSubject());
+
+        } catch (Exception e) {
+            throw new UnauthorizedException("Invalid JWT token");
+        }
+    }
+
+    // ===========================
+    //   OTHER HELPERS
+    // ===========================
     public String getSessionId(String token) {
         Claims c = Jwts.parserBuilder().setSigningKey(key).build()
                 .parseClaimsJws(token).getBody();
@@ -82,9 +135,6 @@ public class JwtUtils {
         return "refresh".equals(c.get("type", String.class));
     }
 
-    // --------------------
-    // NEEDED BY AuthService + OAuth2SuccessHandler
-    // --------------------
     public long getRefreshExpirationMs() {
         return refreshExpiryMs;
     }
