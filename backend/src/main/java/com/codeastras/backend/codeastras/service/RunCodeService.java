@@ -22,44 +22,40 @@ import java.util.concurrent.TimeUnit;
 public class RunCodeService {
 
     private final Logger log = LoggerFactory.getLogger(RunCodeService.class);
+
     private final SessionRegistry sessionRegistry;
-    private final ProjectCollaboratorRepository collaboratorRepo;
+    private final PermissionService permissionService;
 
     @Value("${code.runner.max-output-bytes:131072}") // 128KB
     private int maxOutputBytes;
 
-    public RunCodeService(SessionRegistry sessionRegistry,
-                          ProjectCollaboratorRepository collaboratorRepo) {
+    public RunCodeService(
+            SessionRegistry sessionRegistry,
+            PermissionService permissionService
+    ) {
         this.sessionRegistry = sessionRegistry;
-        this.collaboratorRepo = collaboratorRepo;
+        this.permissionService = permissionService;
     }
 
-    /**
-     * Sanitize a path like "src/main.py" so it is safe to execute inside the container.
-     * We DO NOT modify the folder structure. We only forbid traversal or invalid characters.
-     */
     private String sanitizePath(String path) {
         if (path == null || path.isBlank()) {
-            return "main.py";  // fallback
+            return "main.py";
         }
-
-        // Prevent path traversal
         if (path.contains("..")) {
             return "main.py";
         }
-
-        // Remove leading slash
         if (path.startsWith("/") || path.startsWith("\\")) {
             path = path.substring(1);
         }
-
         return path.replaceAll("[\\r\\n\0]", "");
     }
 
-    /**
-     * Run python <filename> inside the container bound to this session.
-     */
-    public CommandResult runPythonInSession(String sessionId, String filename, int timeoutSeconds, UUID userId) throws Exception {
+    public CommandResult runPythonInSession(
+            String sessionId,
+            String filename,
+            int timeoutSeconds,
+            UUID userId
+    ) throws Exception {
 
         var sessionInfoOpt = sessionRegistry.get(sessionId);
         if (sessionInfoOpt.isEmpty()) {
@@ -69,24 +65,21 @@ public class RunCodeService {
         SessionRegistry.SessionInfo sessionInfo = sessionInfoOpt.get();
         UUID projectId = sessionInfo.projectId;
 
-        // Only collaborators or owners can run code
-        boolean allowed = collaboratorRepo.existsByProjectIdAndUserIdAndStatus(projectId, userId, CollaboratorStatus.ACCEPTED);
-        if (!allowed) {
-            throw new ForbiddenException("You are not authorized to run code in this project");
-        }
+        // 🔐 SINGLE SOURCE OF TRUTH
+        permissionService.checkProjectWriteAccess(projectId, userId);
 
         String containerName = "session_" + sessionId;
         String safeFilename = sanitizePath(filename);
 
-        log.warn("RUN REQUEST FILENAME FROM FE = '{}'", filename);
         log.info("Executing in {}: python3 {}", containerName, safeFilename);
 
-        List<String> cmd = new ArrayList<>();
-        cmd.add("docker");
-        cmd.add("exec");
-        cmd.add(containerName);
-        cmd.add("python3");             // run python 3 explicitly
-        cmd.add(safeFilename);          // run src/main.py, not main.py
+        List<String> cmd = List.of(
+                "docker",
+                "exec",
+                containerName,
+                "python3",
+                safeFilename
+        );
 
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.redirectErrorStream(true);
@@ -94,11 +87,11 @@ public class RunCodeService {
         Process process = pb.start();
 
         StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+        try (BufferedReader reader =
+                     new BufferedReader(new InputStreamReader(process.getInputStream()))) {
 
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
 
-            // FIXED: proper output reading loop
             String line;
             while ((line = reader.readLine()) != null) {
                 appendWithLimit(output, line + "\n");
@@ -107,16 +100,14 @@ public class RunCodeService {
             int exitCode;
             if (!finished) {
                 process.destroyForcibly();
-                appendWithLimit(output, "\n[Process killed after timeout " + timeoutSeconds + "s]\n");
+                appendWithLimit(output,
+                        "\n[Process killed after timeout " + timeoutSeconds + "s]\n");
                 exitCode = -1;
             } else {
                 exitCode = process.exitValue();
             }
 
-            // 🔥 IMPORTANT DIAGNOSTIC LOGS
-            log.warn("PYTHON OUTPUT = {}", output.toString());
-            log.warn("EXIT CODE = {}", exitCode);
-
+            log.info("Run finished: exitCode={}", exitCode);
             return new CommandResult(exitCode, output.toString());
         }
     }

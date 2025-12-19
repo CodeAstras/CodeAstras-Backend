@@ -11,6 +11,7 @@ import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.stereotype.Component;
 
+import java.security.Principal;
 import java.util.UUID;
 
 @Component
@@ -22,24 +23,56 @@ public class WebSocketPermissionInterceptor implements ChannelInterceptor {
 
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
-        StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+
+        StompHeaderAccessor accessor =
+                MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
 
         if (accessor == null) return message;
 
         StompCommand command = accessor.getCommand();
         if (command == null) return message;
 
-        if(command != StompCommand.SUBSCRIBE && command != StompCommand.SEND) {
+        /* ================================
+           1. AUTHENTICATE ON CONNECT
+           ================================ */
+        if (command == StompCommand.CONNECT) {
+            String authHeader = accessor.getFirstNativeHeader("Authorization");
+            if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+                throw new IllegalStateException("Missing Authorization header");
+            }
+
+            String token = authHeader.substring(7);
+            if (!jwtUtils.validate(token)) {
+                throw new IllegalStateException("Invalid JWT");
+            }
+
+            UUID userId = jwtUtils.getUserId(token);
+
+            // 🔥 THIS FIXES principal == null 🔥
+            accessor.setUser((Principal) () -> userId.toString());
+
+            return message;
+        }
+
+        /* ================================
+           2. AUTHORIZE SEND / SUBSCRIBE
+           ================================ */
+        if (command != StompCommand.SUBSCRIBE && command != StompCommand.SEND) {
             return message;
         }
 
         String destination = accessor.getDestination();
-        if(destination == null) return message;
+        if (destination == null) return message;
 
-        UUID userId = extractUserId(accessor);
         UUID projectId = extractProjectId(destination);
+        if (projectId == null) return message; // 🔥 FIXED LOGIC
 
-        if(projectId != null) return message;
+        Principal principal = accessor.getUser();
+        if (principal == null) {
+            throw new IllegalStateException("Unauthenticated WebSocket user");
+        }
+
+        UUID userId = UUID.fromString(principal.getName());
 
         if (command == StompCommand.SUBSCRIBE) {
             permissionService.checkProjectReadAccess(projectId, userId);
@@ -52,16 +85,6 @@ public class WebSocketPermissionInterceptor implements ChannelInterceptor {
         return message;
     }
 
-    private UUID extractUserId(StompHeaderAccessor accessor) {
-        String authHeader = accessor.getFirstNativeHeader("Authorization");
-        if(authHeader == null || !authHeader.startsWith("Bearer ")) {
-            throw new IllegalStateException("Authorization header not found");
-        }
-
-        String token = authHeader.substring(7);
-        return jwtUtils.getUserId(token);
-    }
-
     private UUID extractProjectId(String destination) {
         // Example: /topic/projects/{projectId}/files/{fileId}
         String[] parts = destination.split("/");
@@ -69,8 +92,7 @@ public class WebSocketPermissionInterceptor implements ChannelInterceptor {
             if ("projects".equals(parts[i]) && i + 1 < parts.length) {
                 try {
                     return UUID.fromString(parts[i + 1]);
-                } catch (IllegalArgumentException ignored) {
-                }
+                } catch (IllegalArgumentException ignored) {}
             }
         }
         return null;
