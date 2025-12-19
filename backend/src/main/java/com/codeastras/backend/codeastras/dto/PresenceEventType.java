@@ -1,4 +1,4 @@
-package com.codeastras.backend.codeastras.presence;
+package com.codeastras.backend.codeastras.dto;
 
 public enum PresenceEventType {
     USER_JOINED,

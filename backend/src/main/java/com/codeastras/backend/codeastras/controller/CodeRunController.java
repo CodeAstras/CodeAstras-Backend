@@ -3,8 +3,6 @@ package com.codeastras.backend.codeastras.controller;
 import com.codeastras.backend.codeastras.dto.CommandResult;
 import com.codeastras.backend.codeastras.dto.RunCodeBroadcastMessage;
 import com.codeastras.backend.codeastras.dto.RunCodeRequestWS;
-import com.codeastras.backend.codeastras.exception.ForbiddenException;
-import com.codeastras.backend.codeastras.security.JwtUtils;
 import com.codeastras.backend.codeastras.service.RunCodeService;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import org.slf4j.Logger;
@@ -14,7 +12,7 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
-import java.util.Optional;
+import java.security.Principal;
 import java.util.UUID;
 
 @Controller
@@ -25,65 +23,44 @@ public class CodeRunController {
     private final RunCodeService runCodeService;
     private final SessionRegistry sessionRegistry;
     private final SimpMessagingTemplate messagingTemplate;
-    private final JwtUtils jwtUtils;
 
     public CodeRunController(
             RunCodeService runCodeService,
             SessionRegistry sessionRegistry,
-            SimpMessagingTemplate messagingTemplate,
-            JwtUtils jwtUtils
+            SimpMessagingTemplate messagingTemplate
     ) {
         this.runCodeService = runCodeService;
         this.sessionRegistry = sessionRegistry;
         this.messagingTemplate = messagingTemplate;
-        this.jwtUtils = jwtUtils;
     }
 
-    @MessageMapping("/project/{projectId}/run")
+    @MessageMapping("/projects/{projectId}/run")
     public void handleRun(
             @DestinationVariable UUID projectId,
-            RunCodeRequestWS msg
+            RunCodeRequestWS msg,
+            Principal principal
     ) {
+        UUID userId = UUID.fromString(principal.getName());
 
-        // -------------------------------
-        // 1. Token Validation
-        // -------------------------------
-        if (msg.getToken() == null || !jwtUtils.validate(msg.getToken())) {
-            throw new ForbiddenException("Invalid or missing WebSocket token");
-        }
+        log.info("🚀 RUN REQUEST RECEIVED project={} user={}", projectId, userId);
 
-        UUID userId = jwtUtils.getUserId(msg.getToken());
-
-        // -------------------------------
-        // 2. Strong anti-spoofing checks
-        // -------------------------------
-        if (msg.getProjectId() == null ||
-                !msg.getProjectId().trim().equalsIgnoreCase(projectId.toString())) {
-            log.warn("WS spoof attempt detected for project {} by {}", projectId, userId);
-            throw new ForbiddenException("Invalid projectId in WS message");
-        }
-
-        // -------------------------------
-        // 3. Ensure there is an active session
-        // -------------------------------
+        // 1. Ensure active session
         SessionRegistry.SessionInfo sessionInfo = sessionRegistry.getByProject(projectId);
         if (sessionInfo == null) {
-            broadcast(projectId,
-                    new RunCodeBroadcastMessage("No active session found", -1, userId.toString()));
+            broadcast(projectId, new RunCodeBroadcastMessage(
+                    "No active session found",
+                    -1,
+                    userId.toString()
+            ));
             return;
         }
 
-        // -------------------------------
-        // 4. Normalize filename
-        // -------------------------------
-        String filename = msg.getFilename();
-        if (filename == null || filename.isBlank()) {
-            filename = "main.py";
-        }
+        // 2. Normalize filename
+        String filename = (msg.getFilename() == null || msg.getFilename().isBlank())
+                ? "main.py"
+                : msg.getFilename();
 
-        // -------------------------------
-        // 5. Execute safely
-        // -------------------------------
+        // 3. Execute
         try {
             CommandResult result = runCodeService.runPythonInSession(
                     sessionInfo.sessionId,
@@ -99,7 +76,7 @@ public class CodeRunController {
             ));
 
         } catch (Exception ex) {
-            log.error("Run execution failed: {}", ex.getMessage());
+            log.error("Run execution failed", ex);
             broadcast(projectId, new RunCodeBroadcastMessage(
                     "Execution failed. Check your code and try again.",
                     -1,
@@ -110,7 +87,7 @@ public class CodeRunController {
 
     private void broadcast(UUID projectId, RunCodeBroadcastMessage payload) {
         messagingTemplate.convertAndSend(
-                "/topic/project/" + projectId + "/run-output",
+                "/topic/projects/" + projectId + "/run-output",
                 payload
         );
     }

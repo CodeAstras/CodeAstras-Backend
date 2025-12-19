@@ -124,5 +124,40 @@ public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorServic
                 ))
                 .collect(Collectors.toList());
     }
+
+    @Override
+    @Transactional
+    public ProjectCollaborator updateRole(
+            UUID projectId,
+            UUID targetUserId,
+            CollaboratorRole newRole,
+            UUID requesterId
+    ) {
+        Project project = projectRepo.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
+
+        // Owner-only operation
+        if (!project.getOwner().getId().equals(requesterId)) {
+            throw new ForbiddenException("Only project owner can change roles");
+        }
+
+        // Prevent owner role mutation
+        if (project.getOwner().getId().equals(targetUserId)) {
+            throw new IllegalStateException("Owner role cannot be changed");
+        }
+
+        ProjectCollaborator collab = collabRepo
+                .findByProjectIdAndUserId(projectId, targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Collaborator not found"));
+
+        if (collab.getStatus() != CollaboratorStatus.ACCEPTED) {
+            throw new IllegalStateException("Cannot change role of pending collaborator");
+        }
+
+        collab.setRole(newRole);
+        return collabRepo.save(collab);
+    }
+
+
 }
 
