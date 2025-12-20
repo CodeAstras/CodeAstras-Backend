@@ -1,37 +1,31 @@
 package com.codeastras.backend.codeastras.presence;
 
-import java.time.Instant;
-import java.util.Collection;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import com.codeastras.backend.codeastras.store.SessionRegistry;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.UUID;
+
+@Component
+@RequiredArgsConstructor
 public class PresenceManager {
-    private final Map<UUID, Map<UUID, PresenceState>> projectPresence = new ConcurrentHashMap<>();
+
+    private final SessionRegistry sessionRegistry;
 
     public void userJoined(UUID projectId, UUID userId) {
-        projectPresence.computeIfAbsent(projectId, k -> new ConcurrentHashMap<>())
-                .put(userId, new PresenceState(userId, projectId, null, Instant.now()));
+        sessionRegistry.userJoined(projectId, userId);
     }
 
     public void userLeft(UUID projectId, UUID userId) {
-        Map<UUID, PresenceState> users = projectPresence.get(projectId);
-        if(users != null) {
-            users.remove(userId);
-            if(users.isEmpty()) {
-                projectPresence.remove(projectId);
-            }
-        }
+        sessionRegistry.userLeft(projectId, userId);
     }
 
     public void updateFile(UUID projectId, UUID userId, UUID fileId) {
-        Map<UUID, PresenceState> users = projectPresence.get(projectId);
-        if(users != null && users.containsKey(userId)) {
-            users.put(userId, new PresenceState(userId, projectId, fileId, Instant.now()));
-        }
+        sessionRegistry.updateFile(projectId, userId, fileId);
     }
 
-    public Collection<PresenceState> getProjectPresence(UUID projectId) {
-        return projectPresence.getOrDefault(projectId, Map.of()).values();
+    public Collection<SessionRegistry.PresenceInfo> getPresenceSnapshot(UUID projectId) {
+        return sessionRegistry.getPresenceSnapshot(projectId);
     }
 }

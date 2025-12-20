@@ -116,10 +116,11 @@ public class FileSyncService {
     // HELPER: SAFE PATH RESOLUTION
     private Path resolvePathSafely(Path sessionDir, String userPath) {
 
-        String cleaned = (userPath == null || userPath.isBlank()) ? "main.py" : userPath;
+        String cleaned = (userPath == null || userPath.isBlank())
+                ? "src/main.py"
+                : userPath.replace("\\", "/");
 
-        // Check AFTER cleaning
-        if (cleaned.contains("..") || cleaned.contains("\\")) {
+        if (cleaned.contains("..")) {
             throw new IllegalArgumentException("Invalid path");
         }
 
@@ -135,5 +136,6 @@ public class FileSyncService {
 
         return target;
     }
+
 
 }

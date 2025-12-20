@@ -15,10 +15,12 @@ import org.springframework.stereotype.Controller;
 import java.security.Principal;
 import java.util.UUID;
 
+import static com.codeastras.backend.codeastras.service.FileService.ENTRY_FILE;
+
 @Controller
 public class CodeRunController {
 
-    private final Logger log = LoggerFactory.getLogger(CodeRunController.class);
+    private static final Logger log = LoggerFactory.getLogger(CodeRunController.class);
 
     private final RunCodeService runCodeService;
     private final SessionRegistry sessionRegistry;
@@ -42,43 +44,49 @@ public class CodeRunController {
     ) {
         UUID userId = UUID.fromString(principal.getName());
 
-        log.info("🚀 RUN REQUEST RECEIVED project={} user={}", projectId, userId);
+        log.info("🚀 RUN project={} user={}", projectId, userId);
 
-        // 1. Ensure active session
+        // 1️⃣ Ensure active session
         SessionRegistry.SessionInfo sessionInfo = sessionRegistry.getByProject(projectId);
         if (sessionInfo == null) {
             broadcast(projectId, new RunCodeBroadcastMessage(
-                    "No active session found",
+                    null,
+                    "No active session. Start a session first.",
                     -1,
                     userId.toString()
             ));
             return;
         }
 
-        // 2. Normalize filename
-        String filename = (msg.getFilename() == null || msg.getFilename().isBlank())
-                ? "main.py"
-                : msg.getFilename();
+        // 2️⃣ Decide entry file (SINGLE SOURCE OF TRUTH)
+        String filename =
+                (msg.getFilename() == null || msg.getFilename().isBlank())
+                        ? ENTRY_FILE
+                        : msg.getFilename();
 
-        // 3. Execute
         try {
+            // 3️⃣ Execute code inside running container
             CommandResult result = runCodeService.runPythonInSession(
-                    sessionInfo.sessionId,
+                    sessionInfo.getSessionId(),
                     filename,
                     msg.getTimeoutSeconds(),
                     userId
             );
 
+            // 4️⃣ Broadcast output (SESSION-SCOPED)
             broadcast(projectId, new RunCodeBroadcastMessage(
+                    sessionInfo.getSessionId(),
                     result.getOutput(),
                     result.getExitCode(),
                     userId.toString()
             ));
 
         } catch (Exception ex) {
-            log.error("Run execution failed", ex);
+            log.error("❌ Run failed", ex);
+
             broadcast(projectId, new RunCodeBroadcastMessage(
-                    "Execution failed. Check your code and try again.",
+                    sessionInfo.getSessionId(),
+                    "Execution failed. Check your code.",
                     -1,
                     userId.toString()
             ));

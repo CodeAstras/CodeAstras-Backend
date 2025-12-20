@@ -1,5 +1,6 @@
 package com.codeastras.backend.codeastras.controller;
 
+import com.codeastras.backend.codeastras.dto.CreateFileRequest;
 import com.codeastras.backend.codeastras.dto.ProjectFileContentDto;
 import com.codeastras.backend.codeastras.dto.ProjectFileInfoDto;
 import com.codeastras.backend.codeastras.entity.ProjectFile;
@@ -92,4 +93,24 @@ public class FileController {
             throw new IllegalArgumentException("Invalid path");
         }
     }
+
+    @PostMapping("/{projectId}/files")
+    public ResponseEntity<ProjectFileInfoDto> createFile(
+            @PathVariable UUID projectId,
+            @RequestBody CreateFileRequest body,
+            Authentication auth
+    ) throws IOException {
+
+        UUID userId = (UUID) auth.getPrincipal();
+
+        ProjectFile file = fileService.createFile(
+                projectId,
+                body.getPath(),
+                body.getType(),
+                userId
+        );
+
+        return ResponseEntity.ok(ProjectFileInfoDto.from(file));
+    }
+
 }

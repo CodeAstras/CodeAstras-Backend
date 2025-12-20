@@ -1,10 +1,9 @@
 package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.dto.CommandResult;
-import com.codeastras.backend.codeastras.entity.CollaboratorStatus;
-import com.codeastras.backend.codeastras.exception.ForbiddenException;
+import com.codeastras.backend.codeastras.entity.ProjectFile;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
-import com.codeastras.backend.codeastras.repository.ProjectCollaboratorRepository;
+import com.codeastras.backend.codeastras.repository.ProjectFileRepository;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +12,6 @@ import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -25,29 +23,29 @@ public class RunCodeService {
 
     private final SessionRegistry sessionRegistry;
     private final PermissionService permissionService;
+    private final FileSyncService fileSyncService;
+    private final ProjectFileRepository fileRepo;
 
-    @Value("${code.runner.max-output-bytes:131072}") // 128KB
+    @Value("${code.runner.max-output-bytes:131072}")
     private int maxOutputBytes;
 
     public RunCodeService(
             SessionRegistry sessionRegistry,
-            PermissionService permissionService
+            PermissionService permissionService,
+            FileSyncService fileSyncService,
+            ProjectFileRepository fileRepo
     ) {
         this.sessionRegistry = sessionRegistry;
         this.permissionService = permissionService;
+        this.fileSyncService = fileSyncService;
+        this.fileRepo = fileRepo;
     }
 
     private String sanitizePath(String path) {
-        if (path == null || path.isBlank()) {
-            return "main.py";
+        if (path == null || path.isBlank() || path.contains("..") || path.contains("\\") || path.contains("\0")) {
+            return "src/main.py";
         }
-        if (path.contains("..")) {
-            return "main.py";
-        }
-        if (path.startsWith("/") || path.startsWith("\\")) {
-            path = path.substring(1);
-        }
-        return path.replaceAll("[\\r\\n\0]", "");
+        return path.replace("\r", "").replace("\n", "");
     }
 
     public CommandResult runPythonInSession(
@@ -57,67 +55,72 @@ public class RunCodeService {
             UUID userId
     ) throws Exception {
 
-        var sessionInfoOpt = sessionRegistry.get(sessionId);
-        if (sessionInfoOpt.isEmpty()) {
+        SessionRegistry.SessionInfo sessionInfo =
+                sessionRegistry.getBySessionId(sessionId);
+
+        if (sessionInfo == null) {
             throw new ResourceNotFoundException("Session not found: " + sessionId);
         }
 
-        SessionRegistry.SessionInfo sessionInfo = sessionInfoOpt.get();
-        UUID projectId = sessionInfo.projectId;
-
-        // 🔐 SINGLE SOURCE OF TRUTH
+        UUID projectId = sessionInfo.getProjectId();
         permissionService.checkProjectWriteAccess(projectId, userId);
 
-        String containerName = "session_" + sessionId;
-        String safeFilename = sanitizePath(filename);
+        String safePath = sanitizePath(filename);
 
-        log.info("Executing in {}: python3 {}", containerName, safeFilename);
+        // 1️⃣ DB IS SOURCE OF TRUTH
+        ProjectFile file = fileRepo.findByProjectIdAndPath(projectId, safePath);
+        if (file == null) {
+            throw new ResourceNotFoundException("File not found: " + safePath);
+        }
 
-        List<String> cmd = List.of(
-                "docker",
-                "exec",
-                containerName,
-                "python3",
-                safeFilename
+        String content = file.getContent() == null ? "" : file.getContent();
+
+        // 2️⃣ FORCE SYNC INTO SESSION FS
+        fileSyncService.writeFileToSession(
+                sessionInfo.getSessionId(),
+                safePath,
+                content
         );
 
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.redirectErrorStream(true);
+        String container = sessionInfo.getContainerName();
+        log.info("Executing python3 {} in {}", safePath, container);
 
-        Process process = pb.start();
+        List<String> cmd = List.of(
+                "docker", "exec", container,
+                "sh", "-c", "cd /workspace && python3 " + safePath
+        );
+
+        Process process = new ProcessBuilder(cmd)
+                .redirectErrorStream(true)
+                .start();
 
         StringBuilder output = new StringBuilder();
-        try (BufferedReader reader =
-                     new BufferedReader(new InputStreamReader(process.getInputStream()))) {
 
-            boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        Thread reader = new Thread(() -> {
+            try (BufferedReader r = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    append(output, line + "\n");
+                }
+            } catch (Exception ignored) {}
+        });
 
-            String line;
-            while ((line = reader.readLine()) != null) {
-                appendWithLimit(output, line + "\n");
-            }
+        reader.start();
 
-            int exitCode;
-            if (!finished) {
-                process.destroyForcibly();
-                appendWithLimit(output,
-                        "\n[Process killed after timeout " + timeoutSeconds + "s]\n");
-                exitCode = -1;
-            } else {
-                exitCode = process.exitValue();
-            }
-
-            log.info("Run finished: exitCode={}", exitCode);
-            return new CommandResult(exitCode, output.toString());
+        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        if (!finished) {
+            process.destroyForcibly();
+            append(output, "\n[Process killed after timeout]\n");
+            return new CommandResult(-1, output.toString());
         }
+
+        reader.join();
+        return new CommandResult(process.exitValue(), output.toString());
     }
 
-    private void appendWithLimit(StringBuilder sb, String s) {
+    private void append(StringBuilder sb, String s) {
         if (sb.length() + s.length() > maxOutputBytes) {
-            int available = Math.max(0, maxOutputBytes - sb.length());
-            if (available > 0) {
-                sb.append(s, 0, available);
-            }
             sb.append("\n[Output truncated]\n");
         } else {
             sb.append(s);

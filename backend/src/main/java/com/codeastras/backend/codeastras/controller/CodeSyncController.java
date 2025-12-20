@@ -1,11 +1,11 @@
 package com.codeastras.backend.codeastras.controller;
 
 import com.codeastras.backend.codeastras.dto.CodeEditMessage;
+import com.codeastras.backend.codeastras.dto.ProjectErrorMessage;
 import com.codeastras.backend.codeastras.entity.CollaboratorStatus;
 import com.codeastras.backend.codeastras.exception.ForbiddenException;
 import com.codeastras.backend.codeastras.repository.ProjectCollaboratorRepository;
-import com.codeastras.backend.codeastras.security.JwtUtils;
-import com.codeastras.backend.codeastras.service.FileService;
+import com.codeastras.backend.codeastras.service.DebouncedFileSaveManager;
 import com.codeastras.backend.codeastras.service.FileSyncService;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import org.slf4j.Logger;
@@ -16,7 +16,6 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
-
 import java.util.Map;
 import java.util.UUID;
 
@@ -25,29 +24,25 @@ public class CodeSyncController {
 
     private final Logger log = LoggerFactory.getLogger(CodeSyncController.class);
 
-    private final FileService fileService;
     private final FileSyncService fileSyncService;
     private final SessionRegistry sessionRegistry;
     private final SimpMessagingTemplate messagingTemplate;
-    private final JwtUtils jwtUtils;
     private final ProjectCollaboratorRepository collaboratorRepo;
+    private final DebouncedFileSaveManager debouncedFileSaveManager;
 
     public CodeSyncController(
-            FileService fileService,
             FileSyncService fileSyncService,
             SessionRegistry sessionRegistry,
             SimpMessagingTemplate messagingTemplate,
-            JwtUtils jwtUtils,
-            ProjectCollaboratorRepository collaboratorRepo
+            ProjectCollaboratorRepository collaboratorRepo,
+            DebouncedFileSaveManager debouncedFileSaveManager
     ) {
-        this.fileService = fileService;
         this.fileSyncService = fileSyncService;
         this.sessionRegistry = sessionRegistry;
         this.messagingTemplate = messagingTemplate;
-        this.jwtUtils = jwtUtils;
         this.collaboratorRepo = collaboratorRepo;
+        this.debouncedFileSaveManager = debouncedFileSaveManager;
     }
-
 
     @MessageMapping("/projects/{projectId}/edit")
     public void handleEdit(
@@ -57,9 +52,9 @@ public class CodeSyncController {
     ) {
         UUID userId = UUID.fromString(principal.getName());
 
-        log.info("✏️ CODE EDIT project={} user={}", projectId, userId);
+        log.debug("✏️ CODE EDIT project={} user={}", projectId, userId);
 
-        // FAST-PATH: reject if user is not accepted collaborator (owner included)
+        // 🔐 Permission check
         boolean isAllowed = collaboratorRepo
                 .existsByProjectIdAndUserIdAndStatus(
                         projectId,
@@ -86,30 +81,25 @@ public class CodeSyncController {
         }
 
         try {
-            // 1) Persist to DB
-            fileService.saveFileContent(projectId, path, content, userId);
+            // 1️⃣ Debounced persistence (DB + project FS)
+            debouncedFileSaveManager.scheduleSave(
+                    projectId,
+                    path,
+                    content,
+                    userId
+            );
 
-            // 2) Sync to running session (if any)
+            // 2️⃣ Immediate sync to active session (for live execution)
             var sessionInfo = sessionRegistry.getByProject(projectId);
             if (sessionInfo != null) {
-                try {
-                    fileSyncService.writeFileToSession(
-                            sessionInfo.sessionId,
-                            path,
-                            content
-                    );
-                } catch (Exception e) {
-                    log.error(
-                            "Failed to sync file to session {} for project {}",
-                            sessionInfo.sessionId,
-                            projectId,
-                            e
-                    );
-                    publishProjectError(projectId, "sync_failed", "Failed to sync file to running session");
-                }
+                fileSyncService.writeFileToSession(
+                        sessionInfo.getSessionId(),
+                        path,
+                        content
+                );
             }
 
-            // 3) Broadcast edit (NO token)
+            // 3️⃣ Broadcast edit to collaborators
             CodeEditMessage out = new CodeEditMessage(
                     projectId.toString(),
                     userId.toString(),
@@ -131,11 +121,11 @@ public class CodeSyncController {
         }
     }
 
-
     private void publishProjectError(UUID projectId, String code, String message) {
         messagingTemplate.convertAndSend(
                 "/topic/projects/" + projectId + "/errors",
-                (Object) Map.of("error", code, "message", message)
+                new ProjectErrorMessage(code, message)
         );
     }
+
 }
