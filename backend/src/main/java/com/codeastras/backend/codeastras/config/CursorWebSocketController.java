@@ -1,6 +1,7 @@
 package com.codeastras.backend.codeastras.config;
 
 import com.codeastras.backend.codeastras.dto.CursorUpdateMessage;
+import com.codeastras.backend.codeastras.security.AuthUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -22,7 +23,7 @@ public class CursorWebSocketController {
             CursorUpdateMessage message,
             Principal principal
     ) {
-        UUID senderId = UUID.fromString(principal.getName());
+        UUID senderId = AuthUtil.requireUserId(principal);
 
         if (!senderId.equals(message.getUserId())) {
             throw new IllegalStateException("Invalid cursor update");

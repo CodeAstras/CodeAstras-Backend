@@ -199,32 +199,4 @@ public class ProjectServiceImpl implements ProjectService {
         return files;
     }
 
-    @Override
-    @Transactional
-    public void repairProjectFilesystemIfMissing(UUID projectId) {
-
-        Path projectRoot = Paths.get(storageProperties.getProjects()).resolve(projectId.toString());
-
-        // If directory exists, nothing to do
-        if (Files.exists(projectRoot)) {
-            return;
-        }
-
-        // Read DB files and recreate from scratch
-        List<ProjectFile> files = projectFileRepository.findByProjectId(projectId);
-
-        if (files == null || files.isEmpty()) {
-            // create a default skeleton instead of failing
-            List<ProjectFile> defaults = createDefaultFiles(projectId);
-            projectFileRepository.saveAll(defaults);
-            createProjectRootOnDisk(projectId, defaults);
-            log.warn("No DB files for project {}; created default skeleton", projectId);
-            return;
-        }
-
-        createProjectRootOnDisk(projectId, files);
-        log.warn("Repaired missing filesystem for project {}", projectId);
-    }
-
-
 }

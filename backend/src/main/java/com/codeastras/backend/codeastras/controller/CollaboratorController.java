@@ -4,9 +4,8 @@ import com.codeastras.backend.codeastras.dto.CollaboratorResponse;
 import com.codeastras.backend.codeastras.dto.InviteCollaboratorRequest;
 import com.codeastras.backend.codeastras.dto.UpdateCollaboratorRoleRequest;
 import com.codeastras.backend.codeastras.entity.ProjectCollaborator;
-import com.codeastras.backend.codeastras.security.JwtUtils;
+import com.codeastras.backend.codeastras.security.AuthUtil;
 import com.codeastras.backend.codeastras.service.ProjectCollaboratorService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -22,92 +21,108 @@ import java.util.UUID;
 public class CollaboratorController {
 
     private final ProjectCollaboratorService collabService;
-    private final JwtUtils jwtUtils;
 
+    // ------------------------------------------------
+    // INVITE COLLABORATOR
+    // ------------------------------------------------
     @PostMapping
     public ResponseEntity<CollaboratorResponse> invite(
-            @PathVariable("projectId") UUID projectId,
+            @PathVariable UUID projectId,
             @Valid @RequestBody InviteCollaboratorRequest body,
             Authentication authentication
     ) {
-        UUID requesterId = (UUID) authentication.getPrincipal();
-        ProjectCollaborator collab = collabService.inviteCollaborator(projectId, body.getEmail(), requesterId);
+        UUID requesterId = AuthUtil.requireUserId(authentication);
 
-        return ResponseEntity.ok(new CollaboratorResponse(
-                collab.getUser().getId(),
-                collab.getUser().getEmail(),
-                collab.getRole(),
-                collab.getStatus(),
-                collab.getInvitedAt(),
-                collab.getAcceptedAt()
-        ));
+        ProjectCollaborator collab =
+                collabService.inviteCollaborator(
+                        projectId,
+                        body.getEmail(),
+                        requesterId
+                );
+
+        return ResponseEntity.ok(toResponse(collab));
     }
 
+    // ------------------------------------------------
+    // REMOVE COLLABORATOR
+    // ------------------------------------------------
     @DeleteMapping("/{userId}")
     public ResponseEntity<Void> remove(
-            @PathVariable("projectId") UUID projectId,
-            @PathVariable("userId") UUID userId,
+            @PathVariable UUID projectId,
+            @PathVariable UUID userId,
             Authentication authentication
     ) {
-        UUID requesterId = (UUID) authentication.getPrincipal();
+        UUID requesterId = AuthUtil.requireUserId(authentication);
+
         collabService.removeCollaborator(projectId, userId, requesterId);
         return ResponseEntity.noContent().build();
     }
 
+    // ------------------------------------------------
+    // ACCEPT INVITE
+    // ------------------------------------------------
     @PostMapping("/accept")
     public ResponseEntity<CollaboratorResponse> acceptInvite(
-            @PathVariable("projectId") UUID projectId,
+            @PathVariable UUID projectId,
             Authentication authentication
     ) {
-        UUID userId = (UUID) authentication.getPrincipal();
+        UUID userId = AuthUtil.requireUserId(authentication);
 
-        var collab = collabService.acceptInvite(projectId, userId);
+        ProjectCollaborator collab =
+                collabService.acceptInvite(projectId, userId);
 
-        return ResponseEntity.ok(new CollaboratorResponse(
-                collab.getUser().getId(),
-                collab.getUser().getEmail(),
-                collab.getRole(),
-                collab.getStatus(),
-                collab.getInvitedAt(),
-                collab.getAcceptedAt()
-        ));
+        return ResponseEntity.ok(toResponse(collab));
     }
 
+    // ------------------------------------------------
+    // LIST COLLABORATORS
+    // ------------------------------------------------
     @GetMapping
     public ResponseEntity<List<CollaboratorResponse>> listCollaborators(
-            @PathVariable("projectId") UUID projectId,
+            @PathVariable UUID projectId,
             Authentication authentication
     ) {
-        UUID requesterId = (UUID) authentication.getPrincipal();
+        UUID requesterId = AuthUtil.requireUserId(authentication);
+
         return ResponseEntity.ok(
                 collabService.listProjectCollaborators(projectId, requesterId)
         );
     }
 
+    // ------------------------------------------------
+    // UPDATE ROLE
+    // ------------------------------------------------
     @PatchMapping("/{userId}/role")
     public ResponseEntity<CollaboratorResponse> updateRole(
-            @PathVariable("projectId") UUID projectId,
-            @PathVariable("userId") UUID userId,
+            @PathVariable UUID projectId,
+            @PathVariable UUID userId,
             @Valid @RequestBody UpdateCollaboratorRoleRequest body,
             Authentication authentication
     ) {
-        UUID requesterId = (UUID) authentication.getPrincipal();
+        UUID requesterId = AuthUtil.requireUserId(authentication);
 
-        var collab = collabService.updateRole(
-                projectId,
-                userId,
-                body.getRole(),
-                requesterId
-        );
+        ProjectCollaborator collab =
+                collabService.updateRole(
+                        projectId,
+                        userId,
+                        body.getRole(),
+                        requesterId
+                );
 
-        return ResponseEntity.ok(new CollaboratorResponse(
-                collab.getUser().getId(),
-                collab.getUser().getEmail(),
-                collab.getRole(),
-                collab.getStatus(),
-                collab.getInvitedAt(),
-                collab.getAcceptedAt()
-        ));
+        return ResponseEntity.ok(toResponse(collab));
     }
 
+    // ------------------------------------------------
+    // MAPPER
+    // ------------------------------------------------
+    private CollaboratorResponse toResponse(ProjectCollaborator c) {
+        return new CollaboratorResponse(
+                c.getUser().getId(),
+                c.getUser().getEmail(),
+                c.getRole(),
+                c.getStatus(),
+                c.getInvitedAt(),
+                c.getAcceptedAt()
+        );
+    }
 }

@@ -4,6 +4,7 @@ import com.codeastras.backend.codeastras.entity.Project;
 import com.codeastras.backend.codeastras.exception.ForbiddenException;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.ProjectRepository;
+import com.codeastras.backend.codeastras.security.AuthUtil;
 import com.codeastras.backend.codeastras.service.SessionService;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import org.springframework.security.core.Authentication;
@@ -30,7 +31,7 @@ public class SessionController {
     @PostMapping("/{projectId}/start")
     public String start(@PathVariable UUID projectId, Authentication auth) throws Exception {
 
-        UUID userId = (UUID) auth.getPrincipal();
+        UUID userId = AuthUtil.requireUserId(auth);
 
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
@@ -45,8 +46,7 @@ public class SessionController {
     @PostMapping("/{sessionId}/stop")
     public void stop(@PathVariable String sessionId, Authentication auth) throws Exception {
 
-        UUID userId = (UUID) auth.getPrincipal();
-
+        UUID userId = AuthUtil.requireUserId(auth);
         sessionService.stopSession(sessionId, userId);
     }
 }

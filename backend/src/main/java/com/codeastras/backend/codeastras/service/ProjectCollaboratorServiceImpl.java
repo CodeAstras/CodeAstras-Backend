@@ -7,6 +7,7 @@ import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.ProjectCollaboratorRepository;
 import com.codeastras.backend.codeastras.repository.ProjectRepository;
 import com.codeastras.backend.codeastras.repository.UserRepository;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,20 +24,19 @@ public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorServic
     private final ProjectRepository projectRepo;
     private final UserRepository userRepo;
     private final ProjectCollaboratorRepository collabRepo;
+    private final ProjectAccessManager accessManager;
 
     @Override
     @Transactional
     public ProjectCollaborator inviteCollaborator(UUID projectId, String inviteeEmail, UUID requesterId) {
-        Project project = projectRepo.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
-
-        // Owner check using ownerId
-        if (!project.getOwner().getId().equals(requesterId)) {
-            throw new ForbiddenException("Only project owner can invite collaborators");
-        }
+        Project project = accessManager.requireOwner(projectId, requesterId);
 
         User invitedUser = userRepo.findByEmail(inviteeEmail)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with email: " + inviteeEmail));
+
+        if (invitedUser.getId().equals(requesterId)) {
+            throw new IllegalStateException("You cannot invite yourself");
+        }
 
         collabRepo.findByProjectIdAndUserId(projectId, invitedUser.getId()).ifPresent(existing -> {
             throw new IllegalStateException("User already invited or is a collaborator");
@@ -72,9 +72,8 @@ public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorServic
         boolean isOwner = project.getOwner().getId().equals(requesterId);
         boolean removingSelf = requesterId.equals(userId);
 
-        // Only allow: owner removes anyone OR user removes themselves
         if (!isOwner && !removingSelf) {
-            throw new ForbiddenException("You are not authorized to remove other collaborators");
+            throw new ForbiddenException("Not authorized to remove this collaborator");
         }
 
         ProjectCollaborator collab = collabRepo.findByProjectIdAndUserId(projectId, userId)
@@ -85,17 +84,7 @@ public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorServic
 
     @Override
     public List<CollaboratorResponse> listProjectCollaborators(UUID projectId, UUID requesterId) {
-        Project project = projectRepo.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
-
-        boolean isOwner = project.getOwner().getId().equals(requesterId);
-
-        boolean isAcceptedCollaborator =
-                collabRepo.existsByProjectIdAndUserIdAndStatus(projectId, requesterId, CollaboratorStatus.ACCEPTED);
-
-        if (!isOwner && !isAcceptedCollaborator) {
-            throw new ForbiddenException("Not authorized to view collaborators");
-        }
+        accessManager.requireRead(projectId, requesterId);
 
         return collabRepo.findAllByProjectId(projectId).stream()
                 .map(c -> new CollaboratorResponse(
@@ -133,16 +122,10 @@ public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorServic
             CollaboratorRole newRole,
             UUID requesterId
     ) {
-        Project project = projectRepo.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
-
-        // Owner-only operation
-        if (!project.getOwner().getId().equals(requesterId)) {
-            throw new ForbiddenException("Only project owner can change roles");
-        }
+        accessManager.requireOwner(projectId, requesterId);
 
         // Prevent owner role mutation
-        if (project.getOwner().getId().equals(targetUserId)) {
+        if (projectRepo.findById(projectId).get().getOwner().getId().equals(targetUserId)) {
             throw new IllegalStateException("Owner role cannot be changed");
         }
 
@@ -160,4 +143,3 @@ public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorServic
 
 
 }
-

@@ -17,11 +17,23 @@ public class SessionRegistry {
 
     private static final long PRESENCE_TTL_SECONDS = 30;
 
+    // ================= SESSION STATE =================
+
     // sessionId -> SessionInfo
     private final Map<String, SessionInfo> bySessionId = new ConcurrentHashMap<>();
 
     // projectId -> SessionInfo
     private final Map<UUID, SessionInfo> byProjectId = new ConcurrentHashMap<>();
+
+    // ================= WEBSOCKET MAPPINGS =================
+
+    // wsSessionId -> userId
+    private final Map<String, UUID> wsToUser = new ConcurrentHashMap<>();
+
+    // wsSessionId -> projectId
+    private final Map<String, UUID> wsToProject = new ConcurrentHashMap<>();
+
+    // ================= PRESENCE =================
 
     // projectId -> connected users
     private final Map<UUID, Set<UUID>> connectedUsers = new ConcurrentHashMap<>();
@@ -77,7 +89,7 @@ public class SessionRegistry {
         byProjectId.put(projectId, info);
         connectedUsers.putIfAbsent(projectId, ConcurrentHashMap.newKeySet());
 
-        log.info("Registered session {} for project {}", sessionId, projectId);
+        log.info("✅ Registered session {} for project {}", sessionId, projectId);
     }
 
     public void remove(String sessionId) {
@@ -86,11 +98,11 @@ public class SessionRegistry {
             byProjectId.remove(info.getProjectId());
             connectedUsers.remove(info.getProjectId());
             presence.remove(info.getProjectId());
-            log.info("Removed session {}", sessionId);
+            log.info("🗑 Removed session {}", sessionId);
         }
     }
 
-    // ================= SESSION LOOKUPS =================
+    // ================= LOOKUPS =================
 
     public SessionInfo getBySessionId(String sessionId) {
         return bySessionId.get(sessionId);
@@ -107,6 +119,56 @@ public class SessionRegistry {
                 : Optional.of(info.getSessionId());
     }
 
+    // ================= WEBSOCKET LIFECYCLE =================
+
+    /**
+     * MUST be called on WebSocket connect / subscribe
+     */
+    public void wsUserJoined(
+            String wsSessionId,
+            UUID projectId,
+            UUID userId
+    ) {
+        if (wsSessionId == null || projectId == null || userId == null) {
+            return;
+        }
+
+        wsToUser.put(wsSessionId, userId);
+        wsToProject.put(wsSessionId, projectId);
+
+        userJoined(projectId, userId);
+
+        log.debug(
+                "🟢 WS {} joined project {} as user {}",
+                wsSessionId, projectId, userId
+        );
+    }
+
+    /**
+     * SAFE disconnect handler — can be called multiple times
+     */
+    public void wsUserLeft(String wsSessionId) {
+
+        if (wsSessionId == null) {
+            return;
+        }
+
+        UUID projectId = wsToProject.remove(wsSessionId);
+        UUID userId = wsToUser.remove(wsSessionId);
+
+        if (projectId == null || userId == null) {
+            // Disconnect before full registration — normal
+            return;
+        }
+
+        userLeft(projectId, userId);
+
+        log.debug(
+                "🔴 WS {} left project {} (user {})",
+                wsSessionId, projectId, userId
+        );
+    }
+
     // ================= PRESENCE =================
 
     public void userJoined(UUID projectId, UUID userId) {
@@ -117,8 +179,6 @@ public class SessionRegistry {
         connectedUsers
                 .computeIfAbsent(projectId, k -> ConcurrentHashMap.newKeySet())
                 .add(userId);
-
-        log.debug("User {} joined project {}", userId, projectId);
     }
 
     public void userLeft(UUID projectId, UUID userId) {
@@ -130,8 +190,26 @@ public class SessionRegistry {
                 connectedUsers.remove(projectId);
             }
         }
-        log.debug("User {} left project {}", userId, projectId);
     }
+
+    public void userLeftEverywhere(UUID userId) {
+
+        for (UUID projectId : new HashSet<>(presence.keySet())) {
+
+            Map<UUID, PresenceInfo> users = presence.get(projectId);
+            if (users == null) continue;
+
+            users.remove(userId);
+
+            if (users.isEmpty()) {
+                presence.remove(projectId);
+                connectedUsers.remove(projectId);
+            }
+        }
+
+        log.debug("User {} left all projects", userId);
+    }
+
 
     public void updateFile(UUID projectId, UUID userId, UUID fileId) {
         presence
@@ -139,7 +217,7 @@ public class SessionRegistry {
                 .put(userId, new PresenceInfo(userId, fileId, Instant.now()));
     }
 
-    // 🔥 heartbeat to prevent false disconnects
+    // Heartbeat to prevent false disconnects
     public void heartbeat(UUID projectId, UUID userId) {
         presence
                 .computeIfAbsent(projectId, k -> new ConcurrentHashMap<>())

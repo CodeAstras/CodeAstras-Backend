@@ -4,7 +4,7 @@ import com.codeastras.backend.codeastras.config.StorageProperties;
 import com.codeastras.backend.codeastras.dto.FileNodeDto;
 import com.codeastras.backend.codeastras.dto.NodeType;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
-import com.codeastras.backend.codeastras.repository.ProjectRepository;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -17,24 +17,29 @@ import java.util.*;
 @RequiredArgsConstructor
 public class FileTreeServiceImpl implements FileTreeService {
 
-    private final ProjectRepository projectRepo;
-    private final PermissionService permissionService;
-    private final StorageProperties storageProperties;
-
     private static final int MAX_DEPTH = 10;
+
+    private final ProjectAccessManager accessManager;
+    private final StorageProperties storageProperties;
 
     @Override
     public List<FileNodeDto> getFileTree(UUID projectId, UUID userId) {
 
-        permissionService.checkProjectReadAccess(projectId, userId);
+        // 🔐 SINGLE AUTHORITY
+        accessManager.requireRead(projectId, userId);
 
         Path projectRoot = resolveProjectRoot(projectId);
 
         if (!Files.exists(projectRoot)) {
-            throw new ResourceNotFoundException("Missing folder for project " + projectId);
+            throw new ResourceNotFoundException(
+                    "Missing filesystem for project " + projectId
+            );
         }
+
         if (!Files.isDirectory(projectRoot)) {
-            throw new ResourceNotFoundException("Project root is not a directory");
+            throw new ResourceNotFoundException(
+                    "Project root is not a directory"
+            );
         }
 
         try {
@@ -44,12 +49,16 @@ public class FileTreeServiceImpl implements FileTreeService {
         }
     }
 
+    // ----------------------------------
+    // Helpers
+    // ----------------------------------
+
     private Path resolveProjectRoot(UUID projectId) {
         return Paths.get(storageProperties.getProjects())
                 .resolve(projectId.toString())
+                .toAbsolutePath()
                 .normalize();
     }
-
 
     private List<FileNodeDto> scanDirectory(Path root) throws IOException {
 
@@ -65,11 +74,17 @@ public class FileTreeServiceImpl implements FileTreeService {
         Deque<FileNodeDto> stack = new ArrayDeque<>();
         stack.push(rootNode);
 
-        Files.walkFileTree(root, EnumSet.noneOf(FileVisitOption.class), MAX_DEPTH,
+        Files.walkFileTree(
+                root,
+                EnumSet.noneOf(FileVisitOption.class),
+                MAX_DEPTH,
                 new SimpleFileVisitor<>() {
 
                     @Override
-                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                    public FileVisitResult preVisitDirectory(
+                            Path dir,
+                            BasicFileAttributes attrs
+                    ) {
 
                         if (dir.equals(root)) {
                             return FileVisitResult.CONTINUE;
@@ -93,7 +108,10 @@ public class FileTreeServiceImpl implements FileTreeService {
                     }
 
                     @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    public FileVisitResult visitFile(
+                            Path file,
+                            BasicFileAttributes attrs
+                    ) {
 
                         String rel = normalize(root.relativize(file).toString());
 
@@ -107,12 +125,14 @@ public class FileTreeServiceImpl implements FileTreeService {
                         );
 
                         stack.peek().getChildren().add(node);
-
                         return FileVisitResult.CONTINUE;
                     }
 
                     @Override
-                    public FileVisitResult postVisitDirectory(Path dir, IOException exc) {
+                    public FileVisitResult postVisitDirectory(
+                            Path dir,
+                            IOException exc
+                    ) {
                         if (!dir.equals(root)) {
                             stack.pop();
                         }
@@ -122,9 +142,10 @@ public class FileTreeServiceImpl implements FileTreeService {
                     private String normalize(String p) {
                         return p.replace("\\", "/");
                     }
-                });
+                }
+        );
 
-        return rootNode.getChildren(); // children of the root folder
+        // Return children of root (not the root itself)
+        return rootNode.getChildren();
     }
-
 }

@@ -10,7 +10,5 @@ public interface ProjectService {
     ProjectResponse createProject(CreateProjectRequest request, UUID ownerId);
     ProjectResponse getProject(UUID projectId, UUID requesterId);
     List<ProjectResponse> getProjectsForUser(UUID ownerId);
-    void repairProjectFilesystemIfMissing(UUID projectId);
-
 }
 

@@ -10,6 +10,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import java.security.Key;
+import java.time.Instant;
 import java.util.Date;
 import java.util.UUID;
 
@@ -138,4 +139,15 @@ public class JwtUtils {
     public long getRefreshExpirationMs() {
         return refreshExpiryMs;
     }
+
+    public Instant getExpiry(String token) {
+        Claims claims = Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+
+        return claims.getExpiration().toInstant();
+    }
+
 }

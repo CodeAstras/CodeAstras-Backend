@@ -52,10 +52,22 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(request -> {
                     var cfg = new org.springframework.web.cors.CorsConfiguration();
 
-                    cfg.setAllowedOriginPatterns(List.of("http://localhost:3000"));
-                    cfg.setAllowedMethods(List.of("*"));
-                    cfg.setAllowedHeaders(List.of("*"));
+                    cfg.setAllowedOriginPatterns(List.of(
+                            "http://localhost:3000"
+                    ));
+                    cfg.setAllowedMethods(List.of(
+                            "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"
+                    ));
+                    cfg.setAllowedHeaders(List.of(
+                            "Authorization",
+                            "Content-Type",
+                            "X-Requested-With"
+                    ));
+                    cfg.setExposedHeaders(List.of(
+                            "Set-Cookie"
+                    ));
                     cfg.setAllowCredentials(true);
+
 
                     return cfg;
                 }))

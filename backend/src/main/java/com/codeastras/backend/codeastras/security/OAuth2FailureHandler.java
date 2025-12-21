@@ -5,7 +5,6 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.stereotype.Component;
 
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -22,16 +21,25 @@ public class OAuth2FailureHandler implements AuthenticationFailureHandler {
     }
 
     @Override
-    public void onAuthenticationFailure(HttpServletRequest request,
-                                        HttpServletResponse response,
-                                        AuthenticationException exception)
-            throws IOException {
+    public void onAuthenticationFailure(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            AuthenticationException exception
+    ) throws IOException {
 
-        String message = exception != null ? exception.getMessage() : "OAuth2 authentication failed";
-        String encoded = URLEncoder.encode(message, StandardCharsets.UTF_8);
+        String message =
+                (exception != null && exception.getMessage() != null)
+                        ? exception.getMessage()
+                        : "OAuth2 authentication failed";
 
-        String redirect = oauth2Config.getFrontendOauthSuccessPath() + "?error=" + encoded;
+        String encoded =
+                URLEncoder.encode(message, StandardCharsets.UTF_8);
+
+        String redirect =
+                oauth2Config.getFrontendOauthFailurePath()
+                        + "?error="
+                        + encoded;
+
         response.sendRedirect(redirect);
     }
 }
-

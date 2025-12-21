@@ -25,42 +25,65 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+    protected void doFilterInternal(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            FilterChain filterChain
+    ) throws ServletException, IOException {
+
         String path = request.getRequestURI();
 
-        // SHORT-CIRCUIT: skip auth + oauth endpoints so the OAuth handshake can proceed
-        if (path.startsWith("/login") ||
-                path.startsWith("/oauth2") ||
-                path.startsWith("/api/auth") ||
-                path.startsWith("/error") ||
-                path.startsWith("/.well-known")) {
+        // PUBLIC ENDPOINTS — JUST PASS THROUGH
+        if (path.startsWith("/oauth2")
+                || path.startsWith("/login/oauth2")
+                || path.startsWith("/api/auth")
+                || path.startsWith("/api/health")
+                || path.equals("/")
+                || path.startsWith("/error")) {
+
+            SecurityContextHolder.clearContext();
             filterChain.doFilter(request, response);
             return;
         }
 
         try {
             String header = resolveTokenFromRequest(request);
+
             if (header != null && header.startsWith("Bearer ")) {
                 String token = header.substring(7);
+
                 if (tokenProvider.validate(token)) {
-                    UUID userId = tokenProvider.getUserId(token);
-                    var userOpt = userRepo.findById(userId);
-                    if (userOpt.isPresent()) {
-                        var user = userOpt.get();
-                        var authorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
-                        UsernamePasswordAuthenticationToken auth =
-                                new UsernamePasswordAuthenticationToken(userId, null, authorities);
-                        SecurityContextHolder.getContext().setAuthentication(auth);
+
+                    //  refresh tokens must NOT authenticate APIs
+                    if (!tokenProvider.isRefreshToken(token)) {
+
+                        UUID userId = tokenProvider.getUserId(token);
+                        userRepo.findById(userId).ifPresent(user -> {
+
+                            var authorities =
+                                    List.of(new SimpleGrantedAuthority("ROLE_USER"));
+
+                            UsernamePasswordAuthenticationToken auth =
+                                    new UsernamePasswordAuthenticationToken(
+                                            userId,
+                                            null,
+                                            authorities
+                                    );
+
+                            SecurityContextHolder.getContext()
+                                    .setAuthentication(auth);
+                        });
                     }
                 }
             }
         } catch (Exception ex) {
             SecurityContextHolder.clearContext();
+            request.setAttribute("jwt_error", ex.getMessage());
         }
+
         filterChain.doFilter(request, response);
     }
+
 
 
     private String resolveTokenFromRequest(HttpServletRequest request) {

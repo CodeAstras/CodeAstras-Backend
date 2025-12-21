@@ -20,11 +20,13 @@ public class SessionService {
     private final FileSyncService fileSyncService;
     private final SessionRegistry sessionRegistry;
 
+    // Base path where session FS lives (collaboration only)
     @Value("${code.runner.base-path}")
     private String sessionBasePath;
 
-    @Value("${code.runner.image-name:py-collab-runner}")
-    private String dockerImage;
+    // ⚠️ MUST be a COLLABORATION image, NOT execution runner
+    @Value("${code.session.image-name:codeastras-collab}")
+    private String sessionImage;
 
     public SessionService(
             ProjectRepository projectRepo,
@@ -36,16 +38,24 @@ public class SessionService {
         this.sessionRegistry = sessionRegistry;
     }
 
+    /**
+     * Starts a COLLABORATION SESSION.
+     * This container must NEVER execute user code.
+     */
     public String startSession(UUID projectId, UUID userId) throws Exception {
 
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
 
+        // ⚠️ Product note:
+        // You may later relax this to ACCEPTED collaborators
         if (!project.getOwner().getId().equals(userId)) {
             throw new ForbiddenException("Only owner can start session");
         }
 
-        Optional<String> existing = sessionRegistry.getSessionIdForProject(projectId);
+        Optional<String> existing =
+                sessionRegistry.getSessionIdForProject(projectId);
+
         if (existing.isPresent()) {
             return existing.get();
         }
@@ -53,17 +63,21 @@ public class SessionService {
         String sessionId = UUID.randomUUID().toString();
         String containerName = "session_" + sessionId;
 
+        // 1️⃣ Prepare session filesystem (collaboration state)
         fileSyncService.syncProjectToSession(projectId, sessionId);
 
+        // 2️⃣ Start idle collaboration container
         runCommand(
                 "docker", "run", "-d",
                 "--name", containerName,
                 "-v", sessionBasePath + "/" + sessionId + ":/workspace",
-                dockerImage,
+                sessionImage,
                 "tail", "-f", "/dev/null"
         );
 
+        // 3️⃣ Register session metadata
         sessionRegistry.register(projectId, sessionId, containerName, userId);
+
         return sessionId;
     }
 
@@ -78,18 +92,38 @@ public class SessionService {
             throw new ForbiddenException("Not session owner");
         }
 
+        // Stop container
         runCommand("docker", "rm", "-f", info.getContainerName());
+
+        // Remove collaboration filesystem
         fileSyncService.removeSessionFolder(info.getSessionId());
+
         sessionRegistry.remove(sessionId);
     }
 
     private void runCommand(String... cmd) throws Exception {
-        Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-        try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            while (r.readLine() != null) {}
+        Process p = new ProcessBuilder(cmd)
+                .redirectErrorStream(true)
+                .start();
+
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader r =
+                     new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            String line;
+            while ((line = r.readLine()) != null) {
+                output.append(line).append("\n");
+            }
         }
-        if (p.waitFor() != 0) {
-            throw new RuntimeException("Command failed: " + String.join(" ", cmd));
+
+        int exit = p.waitFor();
+        if (exit != 0) {
+            throw new RuntimeException(
+                    "Command failed (" + exit + "): "
+                            + String.join(" ", cmd)
+                            + "\nOutput:\n"
+                            + output
+            );
         }
     }
+
 }

@@ -1,6 +1,8 @@
 package com.codeastras.backend.codeastras.controller;
 
 import com.codeastras.backend.codeastras.dto.FileNodeDto;
+import com.codeastras.backend.codeastras.security.AuthUtil;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
 import com.codeastras.backend.codeastras.service.FileTreeService;
 import com.codeastras.backend.codeastras.service.ProjectService;
 import lombok.RequiredArgsConstructor;
@@ -15,22 +17,23 @@ import java.util.UUID;
 @RequestMapping("/api/projects/{projectId}/files")
 @RequiredArgsConstructor
 public class FileTreeController {
+
     private final FileTreeService fileTreeService;
-    private final ProjectService projectService;
+    private final ProjectAccessManager accessManager;
 
     @GetMapping("/tree")
-    public ResponseEntity<List<FileNodeDto>> tree(@PathVariable UUID projectId, Authentication auth) {
-        // Extract requester id from Authentication (your security places UUID as principal)
-        UUID requesterId = (UUID) auth.getPrincipal();
+    public ResponseEntity<List<FileNodeDto>> tree(
+            @PathVariable UUID projectId,
+            Authentication auth
+    ) {
+        UUID userId = AuthUtil.requireUserId(auth);
 
-        // 1) Validate permission (this will throw ForbiddenException if unauthorized)
-        projectService.getProject(projectId, requesterId);
+        // 🔐 Single permission check
+        accessManager.requireRead(projectId, userId);
 
-        // 2) Repair filesystem if missing (idempotent and safe)
-        projectService.repairProjectFilesystemIfMissing(projectId);
+        List<FileNodeDto> tree =
+                fileTreeService.getFileTree(projectId, userId);
 
-        // 3) Now read the tree (service will also validate but we already checked)
-        List<FileNodeDto> tree = fileTreeService.getFileTree(projectId, requesterId);
         return ResponseEntity.ok(tree);
     }
 }
