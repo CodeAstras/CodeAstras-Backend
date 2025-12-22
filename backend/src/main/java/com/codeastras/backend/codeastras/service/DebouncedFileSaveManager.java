@@ -1,6 +1,5 @@
 package com.codeastras.backend.codeastras.service;
 
-import com.codeastras.backend.codeastras.repository.ProjectFileRepository;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +20,6 @@ public class DebouncedFileSaveManager {
     private static final long DEBOUNCE_MS = 500;
 
     private final FileService fileService;
-    private final ProjectFileRepository fileRepo;
 
     private final ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -36,16 +34,31 @@ public class DebouncedFileSaveManager {
     private final Map<String, PendingEdit> pendingEdits = new ConcurrentHashMap<>();
     private final Map<String, ScheduledFuture<?>> pendingTasks = new ConcurrentHashMap<>();
 
+    // -------------------------------------------------
+    // DEBOUNCED SAVE
+    // -------------------------------------------------
 
-    public void scheduleSave(UUID projectId, String path, String content, UUID userId) {
+    public void scheduleSave(
+            UUID projectId,
+            String path,
+            String content,
+            UUID userId
+    ) {
         if (projectId == null || path == null || path.isBlank()) return;
 
-        String key = projectId + ":" + path;
+        // 🔒 Normalize path ONCE
+        String safePath = path.replace("\\", "/").replaceAll("/{2,}", "/");
+        String key = projectId + ":" + safePath;
 
-        pendingEdits.put(key, new PendingEdit(projectId, path, content, userId));
+        pendingEdits.put(
+                key,
+                new PendingEdit(projectId, safePath, content, userId)
+        );
 
         ScheduledFuture<?> existing = pendingTasks.remove(key);
-        if (existing != null) existing.cancel(false);
+        if (existing != null) {
+            existing.cancel(false);
+        }
 
         ScheduledFuture<?> future = scheduler.schedule(() -> {
             try {
@@ -68,42 +81,52 @@ public class DebouncedFileSaveManager {
         pendingTasks.put(key, future);
     }
 
+    // -------------------------------------------------
+    // 🔥 HARD GUARANTEE BEFORE EXECUTION
+    // -------------------------------------------------
 
-    /**
-     * 🔥 HARD GUARANTEE:
-     * Flush ALL pending edits for a project synchronously.
-     * Called before execution snapshot.
-     */
     public void flushProject(UUID projectId) {
-        log.info("🚀 FORCING DATABASE UPDATE for project {}", projectId);
 
-        java.util.List<String> keysToFlush = pendingEdits.keySet().stream()
+        log.info("Flushing pending edits for project {}", projectId);
+
+        var keysToFlush = pendingEdits.keySet().stream()
                 .filter(key -> key.startsWith(projectId.toString() + ":"))
                 .toList();
 
         for (String key : keysToFlush) {
+
             PendingEdit edit = pendingEdits.remove(key);
             if (edit == null) continue;
 
-            pendingTasks.remove(key);
+            ScheduledFuture<?> task = pendingTasks.remove(key);
+            if (task != null) task.cancel(false);
 
             try {
-                // 1. Force SQL Update immediately via direct query
-                fileRepo.updateContent(edit.projectId(), edit.path(), edit.content());
-
-                // 2. Update the physical project file on disk
-                fileService.save(edit.projectId(), edit.path(), edit.content(), edit.userId());
-
-                log.info("✅ Flushed and saved: {}", edit.path());
+                fileService.save(
+                        edit.projectId(),
+                        edit.path(),
+                        edit.content(),
+                        edit.userId()
+                );
+                log.info("Flushed and saved: {}", edit.path());
             } catch (Exception e) {
                 log.error("Flush failed for {}", key, e);
             }
         }
     }
 
+    // -------------------------------------------------
 
     @PreDestroy
     public void shutdown() {
-        scheduler.shutdownNow();
+        scheduler.shutdown();
+        try {
+            if (!scheduler.awaitTermination(2, TimeUnit.SECONDS)) {
+                scheduler.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            scheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }

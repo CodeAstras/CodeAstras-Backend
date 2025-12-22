@@ -34,9 +34,9 @@ public class AuthController {
         this.jwt = jwt;
     }
 
-    // ------------------------------------------------
+    // ==================================================
     // SIGNUP
-    // ------------------------------------------------
+    // ==================================================
     @PostMapping("/signup")
     public ResponseEntity<?> signup(
             @RequestBody SignupRequest req,
@@ -49,7 +49,7 @@ public class AuthController {
             User user = userRepo.findByEmail(req.getEmail().toLowerCase())
                     .orElseThrow();
 
-            var gen = authService.createRefreshForUser(
+            var refresh = authService.createRefreshForUser(
                     user,
                     request.getHeader("User-Agent"),
                     request.getRemoteAddr()
@@ -58,7 +58,10 @@ public class AuthController {
             response.setHeader(
                     HttpHeaders.SET_COOKIE,
                     CookieFactory
-                            .refreshToken(gen.refreshJwt(), authService.getRefreshExpiryMs())
+                            .refreshToken(
+                                    refresh.refreshJwt(),
+                                    jwt.getRefreshExpiryMs()
+                            )
                             .toString()
             );
 
@@ -76,9 +79,9 @@ public class AuthController {
         }
     }
 
-    // ------------------------------------------------
+    // ==================================================
     // LOGIN
-    // ------------------------------------------------
+    // ==================================================
     @PostMapping("/login")
     public ResponseEntity<?> login(
             @RequestBody LoginRequest req,
@@ -91,7 +94,7 @@ public class AuthController {
             User user = userRepo.findByEmail(req.getEmail().toLowerCase())
                     .orElseThrow();
 
-            var gen = authService.createRefreshForUser(
+            var refresh = authService.createRefreshForUser(
                     user,
                     request.getHeader("User-Agent"),
                     request.getRemoteAddr()
@@ -100,7 +103,10 @@ public class AuthController {
             response.setHeader(
                     HttpHeaders.SET_COOKIE,
                     CookieFactory
-                            .refreshToken(gen.refreshJwt(), authService.getRefreshExpiryMs())
+                            .refreshToken(
+                                    refresh.refreshJwt(),
+                                    jwt.getRefreshExpiryMs()
+                            )
                             .toString()
             );
 
@@ -118,9 +124,9 @@ public class AuthController {
         }
     }
 
-    // ------------------------------------------------
+    // ==================================================
     // REFRESH TOKEN ROTATION
-    // ------------------------------------------------
+    // ==================================================
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh(
             @CookieValue(name = "refresh_token", required = false) String refreshCookie,
@@ -145,7 +151,10 @@ public class AuthController {
             response.setHeader(
                     HttpHeaders.SET_COOKIE,
                     CookieFactory
-                            .refreshToken(rotated.refreshJwt(), authService.getRefreshExpiryMs())
+                            .refreshToken(
+                                    rotated.refreshJwt(),
+                                    jwt.getRefreshExpiryMs()
+                            )
                             .toString()
             );
 
@@ -163,9 +172,9 @@ public class AuthController {
         }
     }
 
-    // ------------------------------------------------
+    // ==================================================
     // LOGOUT
-    // ------------------------------------------------
+    // ==================================================
     @PostMapping("/logout")
     public ResponseEntity<?> logout(
             @CookieValue(name = "refresh_token", required = false) String refreshCookie,
@@ -176,7 +185,7 @@ public class AuthController {
                 String sessionId = jwt.getSessionId(refreshCookie);
                 authService.revokeSession(sessionId);
             } catch (Exception ignored) {
-                // token might already be invalid — safe to ignore
+                // already invalid → safe to ignore
             }
         }
 

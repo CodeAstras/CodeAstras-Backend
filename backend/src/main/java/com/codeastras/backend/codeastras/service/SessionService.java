@@ -1,10 +1,13 @@
 package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.entity.Project;
-import com.codeastras.backend.codeastras.exception.ForbiddenException;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.ProjectRepository;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -12,75 +15,124 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class SessionService {
 
+    private static final Logger LOG =
+            LoggerFactory.getLogger(SessionService.class);
+
+    private static final int DOCKER_TIMEOUT_SEC = 120;
+
     private final ProjectRepository projectRepo;
     private final FileSyncService fileSyncService;
     private final SessionRegistry sessionRegistry;
+    private final ProjectAccessManager accessManager;
 
-    // Base path where session FS lives (collaboration only)
     @Value("${code.runner.base-path}")
     private String sessionBasePath;
 
-    // ⚠️ MUST be a COLLABORATION image, NOT execution runner
     @Value("${code.session.image-name:codeastras-collab}")
     private String sessionImage;
 
     public SessionService(
             ProjectRepository projectRepo,
             FileSyncService fileSyncService,
-            SessionRegistry sessionRegistry
+            SessionRegistry sessionRegistry,
+            ProjectAccessManager accessManager
     ) {
         this.projectRepo = projectRepo;
         this.fileSyncService = fileSyncService;
         this.sessionRegistry = sessionRegistry;
+        this.accessManager = accessManager;
     }
 
-    /**
-     * Starts a COLLABORATION SESSION.
-     * This container must NEVER execute user code.
-     */
+    // ==================================================
+    // START SESSION (IDEMPOTENT)
+    // ==================================================
     public String startSession(UUID projectId, UUID userId) throws Exception {
+
+        accessManager.require(projectId, userId, ProjectPermission.START_SESSION);
 
         Project project = projectRepo.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
 
-        // ⚠️ Product note:
-        // You may later relax this to ACCEPTED collaborators
-        if (!project.getOwner().getId().equals(userId)) {
-            throw new ForbiddenException("Only owner can start session");
-        }
-
         Optional<String> existing =
                 sessionRegistry.getSessionIdForProject(projectId);
-
         if (existing.isPresent()) {
             return existing.get();
         }
 
-        String sessionId = UUID.randomUUID().toString();
-        String containerName = "session_" + sessionId;
+        synchronized (this) {
 
-        // 1️⃣ Prepare session filesystem (collaboration state)
-        fileSyncService.syncProjectToSession(projectId, sessionId);
+            Optional<String> second =
+                    sessionRegistry.getSessionIdForProject(projectId);
+            if (second.isPresent()) {
+                return second.get();
+            }
 
-        // 2️⃣ Start idle collaboration container
-        runCommand(
-                "docker", "run", "-d",
-                "--name", containerName,
-                "-v", sessionBasePath + "/" + sessionId + ":/workspace",
-                sessionImage,
-                "tail", "-f", "/dev/null"
-        );
+            String sessionId = UUID.randomUUID().toString();
+            String containerName = "session_" + sessionId;
 
-        // 3️⃣ Register session metadata
-        sessionRegistry.register(projectId, sessionId, containerName, userId);
+            LOG.info("Starting session {} for project {}", sessionId, projectId);
 
-        return sessionId;
+            try {
+                fileSyncService.syncProjectToSession(projectId, sessionId);
+
+                String output;
+                try {
+                    output = runCommand(
+                            DOCKER_TIMEOUT_SEC,
+                            "docker", "run", "-d",
+                            "--name", containerName,
+                            "-v", sessionBasePath + "/" + sessionId + ":/workspace",
+                            sessionImage,
+                            "tail", "-f", "/dev/null"
+                    );
+                } catch (RuntimeException e) {
+                    if (e.getMessage().contains("Unable to find image")) {
+                        LOG.info("Docker image missing. Pulling {}...", sessionImage);
+                        runCommand(DOCKER_TIMEOUT_SEC * 2,
+                                "docker", "pull", sessionImage);
+                        output = runCommand(
+                                DOCKER_TIMEOUT_SEC,
+                                "docker", "run", "-d",
+                                "--name", containerName,
+                                "-v", sessionBasePath + "/" + sessionId + ":/workspace",
+                                sessionImage,
+                                "tail", "-f", "/dev/null"
+                        );
+                    } else {
+                        throw e;
+                    }
+                }
+
+                LOG.info("Docker container started: {}", output);
+
+                sessionRegistry.register(
+                        projectId,
+                        sessionId,
+                        containerName,
+                        userId
+                );
+
+                return sessionId;
+
+            } catch (Exception e) {
+                LOG.error("Session start failed for project {}", projectId, e);
+
+                try { fileSyncService.removeSessionFolder(sessionId); } catch (Exception ignored) {}
+                try { runCommand(10, "docker", "rm", "-f", containerName); } catch (Exception ignored) {}
+
+                throw e;
+            }
+        }
     }
 
+    // ==================================================
+    // STOP SESSION
+    // ==================================================
     public void stopSession(String sessionId, UUID requesterId) throws Exception {
 
         SessionRegistry.SessionInfo info =
@@ -88,20 +140,24 @@ public class SessionService {
 
         if (info == null) return;
 
-        if (!info.getOwnerUserId().equals(requesterId)) {
-            throw new ForbiddenException("Not session owner");
-        }
+        accessManager.require(
+                info.getProjectId(),
+                requesterId,
+                ProjectPermission.STOP_SESSION
+        );
 
-        // Stop container
-        runCommand("docker", "rm", "-f", info.getContainerName());
+        runCommand(DOCKER_TIMEOUT_SEC,
+                "docker", "rm", "-f", info.getContainerName());
 
-        // Remove collaboration filesystem
         fileSyncService.removeSessionFolder(info.getSessionId());
-
         sessionRegistry.remove(sessionId);
     }
 
-    private void runCommand(String... cmd) throws Exception {
+    // ==================================================
+    // INTERNAL
+    // ==================================================
+    private String runCommand(int timeoutSec, String... cmd) throws Exception {
+
         Process p = new ProcessBuilder(cmd)
                 .redirectErrorStream(true)
                 .start();
@@ -115,15 +171,20 @@ public class SessionService {
             }
         }
 
-        int exit = p.waitFor();
-        if (exit != 0) {
+        boolean finished = p.waitFor(timeoutSec, TimeUnit.SECONDS);
+        if (!finished) {
+            p.destroyForcibly();
+            throw new RuntimeException("Command timed out: " + String.join(" ", cmd));
+        }
+
+        if (p.exitValue() != 0) {
             throw new RuntimeException(
-                    "Command failed (" + exit + "): "
+                    "Command failed (" + p.exitValue() + "): "
                             + String.join(" ", cmd)
-                            + "\nOutput:\n"
-                            + output
+                            + "\nOutput:\n" + output
             );
         }
-    }
 
+        return output.toString().trim();
+    }
 }

@@ -5,6 +5,7 @@ import com.codeastras.backend.codeastras.entity.ProjectFile;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.ProjectFileRepository;
 import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -40,6 +42,9 @@ public class RunCodeService {
     @Value("${code.runner.max-output-bytes:131072}")
     private int maxOutputBytes;
 
+    @Value("${code.runner.python-image:codeastras-python-runner}")
+    private String pythonRunnerImage;
+
     public CommandResult runPythonInSession(
             String sessionId,
             String filename,
@@ -66,56 +71,51 @@ public class RunCodeService {
         }
 
         try {
-            accessManager.requireWrite(projectId, userId);
+            accessManager.require(projectId, userId, ProjectPermission.EXECUTE_CODE);
 
-            final String safePath = fileSyncService.sanitizeUserPath(filename);
+            final String safePath =
+                    fileSyncService.sanitizeUserPath(filename);
+
+            // 🔒 Ensure file exists & is runnable
+            ProjectFile file =
+                    fileRepo.findByProjectIdAndPath(projectId, safePath);
+
+            if (file == null || !"FILE".equalsIgnoreCase(file.getType())) {
+                throw new ResourceNotFoundException(
+                        "Runnable file not found: " + safePath
+                );
+            }
 
             Path jobDir = Files.createTempDirectory("codeastras-run-");
             log.info("🧪 Execution jobDir = {}", jobDir.toAbsolutePath());
 
             try {
-                // 1. Flush ALL pending edits to DB and Disk
+                // 1️⃣ Flush editor → DB → FS
                 executionCoordinator.flushBeforeExecution(projectId);
 
-                // 2. Write the snapshot (This now clears EntityManager to get fresh data)
+                // 2️⃣ Snapshot DB → execution FS
                 fileSyncService.writeProjectSnapshot(projectId, jobDir);
 
-                // 3. Verify the file actually exists in the snapshot we just created
                 Path targetFile = jobDir.resolve(safePath);
                 if (!Files.exists(targetFile)) {
-                    throw new ResourceNotFoundException("File not found in snapshot: " + safePath);
+                    throw new ResourceNotFoundException(
+                            "File missing in snapshot: " + safePath
+                    );
                 }
 
-                // ⏳ Windows/Docker Volume Sync Grace Period
-                Thread.sleep(150);
-                // -------------------------------
-                // WRITE __runner__.py
-                // -------------------------------
+                // 3️⃣ Runner bootstrap
                 Path runner = jobDir.resolve("__runner__.py");
-                String runnerCode =
-                        "import runpy\n" +
-                                "import sys\n" +
-                                "print('[runner] running:', sys.argv[1])\n" +
-                                "runpy.run_path(sys.argv[1], run_name='__main__')\n";
+                Files.writeString(
+                        runner,
+                        """
+                        import runpy, sys
+                        print('[runner] running:', sys.argv[1])
+                        runpy.run_path(sys.argv[1], run_name='__main__')
+                        """,
+                        StandardCharsets.UTF_8
+                );
 
-                Files.writeString(runner, runnerCode, StandardCharsets.UTF_8);
-
-                // -------------------------------
-                // 🔍 LOG DIR CONTENTS
-                // -------------------------------
-                List<String> files =
-                        Files.walk(jobDir)
-                                .map(p -> jobDir.relativize(p).toString())
-                                .collect(Collectors.toList());
-
-                log.info("📂 jobDir contents:\n{}", String.join("\n", files));
-
-                log.info("📜 __runner__.py contents:\n{}",
-                        Files.readString(runner));
-
-                // -------------------------------
-                // DOCKER COMMAND
-                // -------------------------------
+                // 4️⃣ Docker execution
                 List<String> cmd = List.of(
                         "docker", "run", "--rm",
                         "--cpus=0.5",
@@ -123,11 +123,10 @@ public class RunCodeService {
                         "--network=none",
                         "-w", "/workspace",
                         "-v", jobDir.toAbsolutePath() + ":/workspace",
-                        "codeastras-python-runner",
+                        pythonRunnerImage,
                         "__runner__.py",
-                        safePath // Use the sanitized path of the file the user actually clicked 'Run' on
+                        safePath
                 );
-
 
                 log.info("🐳 Docker command:\n{}", String.join(" ", cmd));
 
@@ -137,8 +136,9 @@ public class RunCodeService {
 
                 StringBuilder output = new StringBuilder();
 
-                Thread reader = new Thread(() ->
-                        streamOutput(process, output, sink)
+                Thread reader = new Thread(
+                        () -> streamOutput(process, output, sink),
+                        "OutputReader-" + projectId
                 );
                 reader.start();
 
@@ -156,9 +156,7 @@ public class RunCodeService {
                 return new CommandResult(process.exitValue(), output.toString());
 
             } finally {
-                Files.walk(jobDir)
-                        .sorted(Comparator.reverseOrder())
-                        .forEach(p -> p.toFile().delete());
+                safeDeleteDirectory(jobDir);
             }
 
         } finally {
@@ -173,25 +171,45 @@ public class RunCodeService {
     ) {
         try (BufferedReader reader =
                      new BufferedReader(
-                             new InputStreamReader(process.getInputStream()))) {
+                             new InputStreamReader(
+                                     process.getInputStream(),
+                                     StandardCharsets.UTF_8))) {
 
             String line;
             while ((line = reader.readLine()) != null) {
-
                 if (output.length() + line.length() > maxOutputBytes) {
                     appendTruncatedNotice(output);
                     break;
                 }
-
                 output.append(line).append("\n");
                 sink.onOutput(line);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.error("Error streaming output", e);
+        }
     }
 
     private void appendTruncatedNotice(StringBuilder sb) {
         if (!sb.toString().contains("[Output truncated]")) {
             sb.append("\n[Output truncated]\n");
+        }
+    }
+
+    private void safeDeleteDirectory(Path dir) {
+        if (dir == null || !Files.exists(dir)) return;
+
+        try {
+            Files.walk(dir)
+                    .sorted(Comparator.reverseOrder())
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                        } catch (IOException e) {
+                            log.warn("Failed to delete {}", p);
+                        }
+                    });
+        } catch (IOException e) {
+            log.warn("Cleanup failed for {}", dir, e);
         }
     }
 }

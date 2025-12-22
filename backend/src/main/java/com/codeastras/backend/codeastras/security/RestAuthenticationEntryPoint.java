@@ -11,7 +11,6 @@ import java.util.Map;
 public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
     private final ObjectMapper mapper = new ObjectMapper();
-
     @Override
     public void commence(
             HttpServletRequest request,
@@ -22,12 +21,18 @@ public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json");
 
+        String message =
+                (authException != null && authException.getMessage() != null)
+                        ? authException.getMessage()
+                        : "Unauthorized";
+
         mapper.writeValue(
                 response.getOutputStream(),
                 Map.of(
                         "error", "unauthorized",
-                        "message", authException.getMessage()
+                        "message", message
                 )
         );
     }
+
 }

@@ -1,151 +1,105 @@
 package com.codeastras.backend.codeastras.service;
 
-import com.codeastras.backend.codeastras.config.StorageProperties;
 import com.codeastras.backend.codeastras.dto.FileNodeDto;
 import com.codeastras.backend.codeastras.dto.NodeType;
-import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
+import com.codeastras.backend.codeastras.entity.ProjectFile;
+import com.codeastras.backend.codeastras.repository.ProjectFileRepository;
 import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
+import java.time.Instant;
 import java.util.*;
 
 @Service
 @RequiredArgsConstructor
 public class FileTreeServiceImpl implements FileTreeService {
 
-    private static final int MAX_DEPTH = 10;
-
+    private final ProjectFileRepository projectFileRepository;
     private final ProjectAccessManager accessManager;
-    private final StorageProperties storageProperties;
+    private final FileSyncService fileSyncService;
 
     @Override
-    public List<FileNodeDto> getFileTree(UUID projectId, UUID userId) {
+    public List<FileNodeDto> getTree(UUID projectId, UUID userId) {
 
         // 🔐 SINGLE AUTHORITY
-        accessManager.requireRead(projectId, userId);
+        accessManager.require(projectId, userId, ProjectPermission.READ_TREE);
 
-        Path projectRoot = resolveProjectRoot(projectId);
+        List<ProjectFile> files =
+                projectFileRepository.findByProjectId(projectId);
 
-        if (!Files.exists(projectRoot)) {
-            throw new ResourceNotFoundException(
-                    "Missing filesystem for project " + projectId
-            );
-        }
+        // Use LinkedHashMap for deterministic order
+        Map<String, FileNodeDto> nodeMap = new LinkedHashMap<>();
+        List<FileNodeDto> roots = new ArrayList<>();
 
-        if (!Files.isDirectory(projectRoot)) {
-            throw new ResourceNotFoundException(
-                    "Project root is not a directory"
-            );
-        }
+        for (ProjectFile file : files) {
 
-        try {
-            return scanDirectory(projectRoot);
-        } catch (IOException e) {
-            throw new RuntimeException("File tree scan failed", e);
-        }
-    }
+            // 🔒 Canonical path
+            String normalizedPath =
+                    fileSyncService.sanitizeUserPath(file.getPath());
 
-    // ----------------------------------
-    // Helpers
-    // ----------------------------------
+            String[] parts = normalizedPath.split("/");
 
-    private Path resolveProjectRoot(UUID projectId) {
-        return Paths.get(storageProperties.getProjects())
-                .resolve(projectId.toString())
-                .toAbsolutePath()
-                .normalize();
-    }
+            StringBuilder currentPath = new StringBuilder();
 
-    private List<FileNodeDto> scanDirectory(Path root) throws IOException {
+            for (int i = 0; i < parts.length; i++) {
+                if (i > 0) currentPath.append("/");
+                currentPath.append(parts[i]);
 
-        FileNodeDto rootNode = new FileNodeDto(
-                root.getFileName().toString(),
-                "",
-                NodeType.FOLDER,
-                null,
-                Files.getLastModifiedTime(root).toInstant(),
-                new ArrayList<>()
-        );
+                String key = currentPath.toString();
 
-        Deque<FileNodeDto> stack = new ArrayDeque<>();
-        stack.push(rootNode);
+                if (!nodeMap.containsKey(key)) {
 
-        Files.walkFileTree(
-                root,
-                EnumSet.noneOf(FileVisitOption.class),
-                MAX_DEPTH,
-                new SimpleFileVisitor<>() {
+                    boolean isFile =
+                            i == parts.length - 1 &&
+                                    "FILE".equalsIgnoreCase(file.getType());
 
-                    @Override
-                    public FileVisitResult preVisitDirectory(
-                            Path dir,
-                            BasicFileAttributes attrs
-                    ) {
+                    FileNodeDto node = new FileNodeDto(
+                            parts[i],
+                            key,
+                            isFile ? NodeType.FILE : NodeType.FOLDER,
+                            isFile
+                                    ? (long) (file.getContent() == null
+                                    ? 0
+                                    : file.getContent().length())
+                                    : null,
+                            // folders get stable timestamps
+                            isFile
+                                    ? (file.getUpdatedAt() != null
+                                    ? file.getUpdatedAt()
+                                    : Instant.now())
+                                    : Instant.EPOCH,
+                            isFile ? null : new ArrayList<>()
+                    );
 
-                        if (dir.equals(root)) {
-                            return FileVisitResult.CONTINUE;
-                        }
+                    nodeMap.put(key, node);
 
-                        String rel = normalize(root.relativize(dir).toString());
-
-                        FileNodeDto node = new FileNodeDto(
-                                dir.getFileName().toString(),
-                                rel,
-                                NodeType.FOLDER,
-                                null,
-                                attrs.lastModifiedTime().toInstant(),
-                                new ArrayList<>()
-                        );
-
-                        stack.peek().getChildren().add(node);
-                        stack.push(node);
-
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult visitFile(
-                            Path file,
-                            BasicFileAttributes attrs
-                    ) {
-
-                        String rel = normalize(root.relativize(file).toString());
-
-                        FileNodeDto node = new FileNodeDto(
-                                file.getFileName().toString(),
-                                rel,
-                                NodeType.FILE,
-                                attrs.size(),
-                                attrs.lastModifiedTime().toInstant(),
-                                null
-                        );
-
-                        stack.peek().getChildren().add(node);
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult postVisitDirectory(
-                            Path dir,
-                            IOException exc
-                    ) {
-                        if (!dir.equals(root)) {
-                            stack.pop();
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    private String normalize(String p) {
-                        return p.replace("\\", "/");
+                    if (i == 0) {
+                        roots.add(node);
+                    } else {
+                        String parentKey =
+                                key.substring(0, key.lastIndexOf("/"));
+                        FileNodeDto parent = nodeMap.get(parentKey);
+                        parent.getChildren().add(node);
                     }
                 }
-        );
+            }
+        }
 
-        // Return children of root (not the root itself)
-        return rootNode.getChildren();
+        // 🔽 Optional: sort children alphabetically
+        roots.forEach(this::sortRecursively);
+
+        return roots;
+    }
+
+    private void sortRecursively(FileNodeDto node) {
+        if (node.getChildren() == null) return;
+
+        node.getChildren().sort(Comparator.comparing(FileNodeDto::getName));
+
+        for (FileNodeDto child : node.getChildren()) {
+            sortRecursively(child);
+        }
     }
 }

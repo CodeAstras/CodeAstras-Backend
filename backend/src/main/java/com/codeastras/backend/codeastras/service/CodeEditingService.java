@@ -2,9 +2,9 @@ package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.dto.CodeEditMessage;
 import com.codeastras.backend.codeastras.dto.ProjectErrorMessage;
-import com.codeastras.backend.codeastras.entity.CollaboratorStatus;
-import com.codeastras.backend.codeastras.repository.ProjectCollaboratorRepository;
-import com.codeastras.backend.codeastras.store.SessionRegistry;
+import com.codeastras.backend.codeastras.exception.ForbiddenException;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -15,28 +15,32 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CodeEditingService {
 
-    private final ProjectCollaboratorRepository collaboratorRepo;
+    private static final int MAX_CONTENT_SIZE = 300_000;
+
     private final DebouncedFileSaveManager debouncedFileSaveManager;
-    private final SessionFacade sessionFacade;
     private final FileSyncService fileSyncService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ProjectAccessManager accessManager;
 
-    private static final int MAX_CONTENT_SIZE = 300_000;
+    // -------------------------------------------------
+    // MAIN ENTRY
+    // -------------------------------------------------
 
     public void handleEdit(UUID projectId, CodeEditMessage msg, UUID userId) {
 
-        boolean isAllowed = collaboratorRepo
-                .existsByProjectIdAndUserIdAndStatus(
-                        projectId,
-                        userId,
-                        CollaboratorStatus.ACCEPTED
-                );
-
-        if (!isAllowed) {
+        // 🔐 AUTHORIZATION
+        try {
+            accessManager.require(
+                    projectId,
+                    userId,
+                    ProjectPermission.UPDATE_FILE
+            );
+        } catch (ForbiddenException e) {
             publishError(projectId, "forbidden", "Not authorized");
             return;
         }
 
+        // 🧼 PATH VALIDATION
         final String path;
         try {
             path = fileSyncService.sanitizeUserPath(msg.getPath());
@@ -45,13 +49,14 @@ public class CodeEditingService {
             return;
         }
 
+        // 📦 PAYLOAD VALIDATION
         String content = msg.getContent();
-
         if (content != null && content.length() > MAX_CONTENT_SIZE) {
             publishError(projectId, "payload_too_large", "Content too large");
             return;
         }
 
+        // 🕒 ASYNC DURABLE SAVE (DB + FS + SESSION handled later)
         debouncedFileSaveManager.scheduleSave(
                 projectId,
                 path,
@@ -59,20 +64,7 @@ public class CodeEditingService {
                 userId
         );
 
-        SessionRegistry.SessionInfo session =
-                sessionFacade.getSessionByProject(projectId);
-
-        if (session != null) {
-            try {
-                fileSyncService.writeFileToSession(
-                        session.getSessionId(),
-                        path,
-                        content
-                );
-            } catch (Exception ignored) {
-            }
-        }
-
+        // 📡 REAL-TIME BROADCAST
         messagingTemplate.convertAndSend(
                 "/topic/projects/" + projectId + "/code",
                 new CodeEditMessage(
@@ -84,6 +76,8 @@ public class CodeEditingService {
                 )
         );
     }
+
+    // -------------------------------------------------
 
     private void publishError(UUID projectId, String code, String message) {
         messagingTemplate.convertAndSend(

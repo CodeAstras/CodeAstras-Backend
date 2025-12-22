@@ -3,6 +3,9 @@ package com.codeastras.backend.codeastras.service;
 import com.codeastras.backend.codeastras.dto.CommandResult;
 import com.codeastras.backend.codeastras.dto.RunCodeBroadcastMessage;
 import com.codeastras.backend.codeastras.dto.RunCodeRequestWS;
+import com.codeastras.backend.codeastras.exception.ForbiddenException;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -17,8 +20,27 @@ public class CodeExecutionService {
     private final RunCodeService runCodeService;
     private final SessionFacade sessionFacade;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ProjectAccessManager accessManager;
 
     public void run(UUID projectId, RunCodeRequestWS msg, UUID userId) {
+
+        // 🔐 AUTHORIZE EARLY
+        try {
+            accessManager.require(
+                    projectId,
+                    userId,
+                    ProjectPermission.EXECUTE_CODE
+            );
+        } catch (ForbiddenException e) {
+            send(projectId, new RunCodeBroadcastMessage(
+                    null,
+                    "RUN_ERROR",
+                    "Not authorized to execute code",
+                    -1,
+                    userId.toString()
+            ));
+            return;
+        }
 
         SessionRegistry.SessionInfo session =
                 sessionFacade.getSessionByProject(projectId);
@@ -39,7 +61,7 @@ public class CodeExecutionService {
                         ? "main.py"
                         : msg.getFilename();
 
-        // 🔥 RUN STARTED
+        // 🔥 RUN STARTED (single authoritative signal)
         send(projectId, new RunCodeBroadcastMessage(
                 session.getSessionId(),
                 "RUN_STARTED",
@@ -55,7 +77,8 @@ public class CodeExecutionService {
                             filename,
                             msg.getTimeoutSeconds(),
                             userId,
-                            line -> send(projectId,
+                            line -> send(
+                                    projectId,
                                     new RunCodeBroadcastMessage(
                                             session.getSessionId(),
                                             "RUN_OUTPUT",
@@ -79,7 +102,9 @@ public class CodeExecutionService {
             send(projectId, new RunCodeBroadcastMessage(
                     session.getSessionId(),
                     "RUN_ERROR",
-                    "Execution failed",
+                    ex.getMessage() != null
+                            ? ex.getMessage()
+                            : "Execution failed",
                     -1,
                     userId.toString()
             ));

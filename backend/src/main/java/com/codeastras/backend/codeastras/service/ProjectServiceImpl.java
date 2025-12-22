@@ -5,9 +5,10 @@ import com.codeastras.backend.codeastras.dto.CreateProjectRequest;
 import com.codeastras.backend.codeastras.dto.ProjectResponse;
 import com.codeastras.backend.codeastras.entity.*;
 import com.codeastras.backend.codeastras.exception.DuplicateResourceException;
-import com.codeastras.backend.codeastras.exception.ForbiddenException;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.*;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -27,7 +28,8 @@ import static com.codeastras.backend.codeastras.entity.CollaboratorStatus.ACCEPT
 @RequiredArgsConstructor
 public class ProjectServiceImpl implements ProjectService {
 
-    private final Logger log = LoggerFactory.getLogger(ProjectServiceImpl.class);
+    private final Logger log =
+            LoggerFactory.getLogger(ProjectServiceImpl.class);
 
     private final ProjectRepository projectRepository;
     private final ProjectFileRepository projectFileRepository;
@@ -35,16 +37,21 @@ public class ProjectServiceImpl implements ProjectService {
     private final ProjectCollaboratorRepository collaboratorRepo;
     private final SessionRegistry sessionRegistry;
     private final StorageProperties storageProperties;
+    private final ProjectAccessManager accessManager;
 
     // ---------------------------------------------------------
     // CREATE PROJECT
     // ---------------------------------------------------------
+
     @Override
     @Transactional
-    public ProjectResponse createProject(CreateProjectRequest request, UUID ownerId) {
-
+    public ProjectResponse createProject(
+            CreateProjectRequest request,
+            UUID ownerId
+    ) {
         User owner = userRepository.findById(ownerId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("User not found"));
 
         validateProjectName(request.getName());
 
@@ -52,7 +59,6 @@ public class ProjectServiceImpl implements ProjectService {
             throw new DuplicateResourceException("Project name already exists");
         }
 
-        // Create project entity
         Project project = new Project();
         project.setId(UUID.randomUUID());
         project.setName(request.getName());
@@ -63,16 +69,15 @@ public class ProjectServiceImpl implements ProjectService {
 
         project = projectRepository.save(project);
 
-        // Create project files (DB + FS)
-        List<ProjectFile> initialFiles = createDefaultFiles(project.getId());
-        projectFileRepository.saveAll(initialFiles);
+        // ---------------- DEFAULT FILES
+        List<ProjectFile> initialFiles =
+                createDefaultFiles(project.getId());
 
+        projectFileRepository.saveAll(initialFiles);
         createProjectRootOnDisk(project.getId(), initialFiles);
 
-        // Register owner as collaborator
-        ProjectCollaborator ownerRow = new ProjectCollaborator(project, owner, CollaboratorRole.OWNER);
-        ownerRow.setStatus(ACCEPTED);
-        collaboratorRepo.save(ownerRow);
+        // ---------------- OWNER AS COLLABORATOR (CRITICAL)
+        registerOwnerCollaborator(project, owner);
 
         return ProjectResponse.from(project, initialFiles, null);
     }
@@ -80,24 +85,32 @@ public class ProjectServiceImpl implements ProjectService {
     // ---------------------------------------------------------
     // GET PROJECT
     // ---------------------------------------------------------
+
     @Override
     @Transactional(readOnly = true)
-    public ProjectResponse getProject(UUID projectId, UUID requesterId) {
+    public ProjectResponse getProject(
+            UUID projectId,
+            UUID requesterId
+    ) {
+        accessManager.require(
+                projectId,
+                requesterId,
+                ProjectPermission.READ_FILE
+        );
 
         Project project = projectRepository.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException(
+                                "Project not found: " + projectId));
 
-        boolean isOwner = project.getOwner().getId().equals(requesterId);
-        boolean isCollaborator = collaboratorRepo.existsByProjectIdAndUserIdAndStatus(projectId, requesterId, ACCEPTED);
+        List<ProjectFile> files =
+                projectFileRepository.findByProjectId(projectId);
 
-        if (!isOwner && !isCollaborator) {
-            throw new ForbiddenException("Not authorized");
-        }
+        SessionRegistry.SessionInfo session =
+                sessionRegistry.getByProject(projectId);
 
-        List<ProjectFile> files = projectFileRepository.findByProjectId(projectId);
-
-        SessionRegistry.SessionInfo s = sessionRegistry.getByProject(projectId);
-        String activeSessionId = (s == null) ? null : s.getSessionId();
+        String activeSessionId =
+                session == null ? null : session.getSessionId();
 
         return ProjectResponse.from(project, files, activeSessionId);
     }
@@ -105,27 +118,70 @@ public class ProjectServiceImpl implements ProjectService {
     // ---------------------------------------------------------
     // LIST USER PROJECTS
     // ---------------------------------------------------------
+
     @Override
-    public List<ProjectResponse> getProjectsForUser(UUID ownerId) {
+    public List<ProjectResponse> getProjectsForUser(UUID userId) {
 
-        List<Project> projects = projectRepository.findByOwner_Id(ownerId);
+        Objects.requireNonNull(userId, "userId must not be null");
 
-        return projects.stream()
-                .map(project -> {
-                    List<ProjectFile> files = projectFileRepository.findByProjectId(project.getId());
+        List<Project> owned =
+                projectRepository.findByOwner_Id(userId);
 
-                    String activeSessionId = sessionRegistry
-                            .getSessionIdForProject(project.getId())
-                            .orElse(null);
+        List<ProjectCollaborator> collabs =
+                collaboratorRepo.findAllByUserId(userId)
+                        .stream()
+                        .filter(c -> c.getStatus() == ACCEPTED)
+                        .toList();
 
-                    return ProjectResponse.from(project, files, activeSessionId);
-                })
-                .toList();
+        Set<UUID> seen = new HashSet<>();
+        List<ProjectResponse> result = new ArrayList<>();
+
+        for (Project project : owned) {
+            seen.add(project.getId());
+            result.add(toResponse(project));
+        }
+
+        for (ProjectCollaborator c : collabs) {
+            Project project = c.getProject();
+            if (seen.add(project.getId())) {
+                result.add(toResponse(project));
+            }
+        }
+
+        return result;
     }
 
     // ---------------------------------------------------------
-    // HELPERS
+    // INTERNAL HELPERS
     // ---------------------------------------------------------
+
+    private void registerOwnerCollaborator(Project project, User owner) {
+
+        ProjectCollaborator ownerRow =
+                new ProjectCollaborator(
+                        project,
+                        owner,
+                        CollaboratorRole.OWNER
+                );
+
+        ownerRow.setStatus(ACCEPTED);
+        ownerRow.setAcceptedAt(Instant.now());
+
+        collaboratorRepo.save(ownerRow);
+    }
+
+    private ProjectResponse toResponse(Project project) {
+
+        List<ProjectFile> files =
+                projectFileRepository.findByProjectId(project.getId());
+
+        String activeSessionId =
+                sessionRegistry
+                        .getSessionIdForProject(project.getId())
+                        .orElse(null);
+
+        return ProjectResponse.from(project, files, activeSessionId);
+    }
 
     private void validateProjectName(String name) {
         if (name == null || name.isBlank()) {
@@ -135,23 +191,32 @@ public class ProjectServiceImpl implements ProjectService {
             throw new IllegalArgumentException("Project name too long");
         }
         if (!name.matches("[A-Za-z0-9_\\- ]+")) {
-            throw new IllegalArgumentException("Project name contains invalid characters");
+            throw new IllegalArgumentException(
+                    "Project name contains invalid characters");
         }
     }
 
-    private void createProjectRootOnDisk(UUID projectId, List<ProjectFile> initialFiles) {
-        Path projectRoot = Paths.get(storageProperties.getProjects()).resolve(projectId.toString());
+    private void createProjectRootOnDisk(
+            UUID projectId,
+            List<ProjectFile> initialFiles
+    ) {
+        Path projectRoot =
+                Paths.get(storageProperties.getProjects())
+                        .resolve(projectId.toString());
 
         try {
             Files.createDirectories(projectRoot);
 
             for (ProjectFile f : initialFiles) {
+
                 Path p = projectRoot.resolve(f.getPath());
 
-                if (f.getType().equals("FOLDER")) {
+                if ("FOLDER".equals(f.getType())) {
                     Files.createDirectories(p);
                 } else {
-                    if (p.getParent() != null) Files.createDirectories(p.getParent());
+                    if (p.getParent() != null) {
+                        Files.createDirectories(p.getParent());
+                    }
                     Files.writeString(
                             p,
                             f.getContent() == null ? "" : f.getContent(),
@@ -162,14 +227,22 @@ public class ProjectServiceImpl implements ProjectService {
                 }
             }
 
-            log.info("Project {} created at {}", projectId, projectRoot);
+            log.info(
+                    "Project {} created at {}",
+                    projectId,
+                    projectRoot
+            );
 
         } catch (IOException e) {
-            throw new RuntimeException("Failed to create project directory structure", e);
+            throw new RuntimeException(
+                    "Failed to create project directory structure",
+                    e
+            );
         }
     }
 
     private List<ProjectFile> createDefaultFiles(UUID projectId) {
+
         List<ProjectFile> files = new ArrayList<>();
 
         files.add(new ProjectFile(
@@ -198,5 +271,4 @@ public class ProjectServiceImpl implements ProjectService {
 
         return files;
     }
-
 }

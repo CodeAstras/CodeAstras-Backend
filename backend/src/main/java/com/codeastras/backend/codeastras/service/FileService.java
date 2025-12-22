@@ -5,6 +5,7 @@ import com.codeastras.backend.codeastras.entity.ProjectFile;
 import com.codeastras.backend.codeastras.exception.ResourceNotFoundException;
 import com.codeastras.backend.codeastras.repository.ProjectFileRepository;
 import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import com.codeastras.backend.codeastras.store.SessionRegistry;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -26,8 +27,6 @@ public class FileService {
     private static final Logger log =
             LoggerFactory.getLogger(FileService.class);
 
-    public static final String ENTRY_FILE = "src/main.py";
-
     private final ProjectFileRepository fileRepo;
     private final ProjectAccessManager accessManager;
     private final FileSyncService fileSyncService;
@@ -35,46 +34,24 @@ public class FileService {
     private final StorageProperties storageProperties;
 
     // ==================================================
-    // PATH HELPERS
-    // ==================================================
-
-    public String validateAndNormalizePath(String path) {
-        if (path == null || path.isBlank()) {
-            throw new IllegalArgumentException("Path cannot be empty");
-        }
-        if (path.startsWith("/") || path.startsWith("\\")) {
-            throw new IllegalArgumentException("Path cannot start with slash");
-        }
-        if (path.contains("..") || path.contains("\0")) {
-            throw new IllegalArgumentException("Invalid path traversal");
-        }
-        return path.replace("\\", "/");
-    }
-
-    private Path projectRoot(UUID projectId) {
-        return Paths.get(storageProperties.getProjects())
-                .resolve(projectId.toString())
-                .toAbsolutePath()
-                .normalize();
-    }
-
-    // ==================================================
     // READS
     // ==================================================
 
     public List<ProjectFile> findAll(UUID projectId, UUID userId) {
-        accessManager.requireRead(projectId, userId);
+        accessManager.require(projectId, userId, ProjectPermission.READ_FILE);
         return fileRepo.findByProjectId(projectId);
     }
 
     public ProjectFile getFile(UUID projectId, String path, UUID userId) {
-        accessManager.requireRead(projectId, userId);
+        accessManager.require(projectId, userId, ProjectPermission.READ_FILE);
 
-        String safe = validateAndNormalizePath(path);
-        ProjectFile file = fileRepo.findByProjectIdAndPath(projectId, safe);
+        String safePath = fileSyncService.sanitizeUserPath(path);
+
+        ProjectFile file =
+                fileRepo.findByProjectIdAndPath(projectId, safePath);
 
         if (file == null) {
-            throw new ResourceNotFoundException("File not found: " + safe);
+            throw new ResourceNotFoundException("File not found: " + safePath);
         }
         return file;
     }
@@ -89,56 +66,65 @@ public class FileService {
             String path,
             String type,
             UUID userId
-    ) throws IOException {
+    ) {
 
-        accessManager.requireWrite(projectId, userId);
-
-        String safe = validateAndNormalizePath(path);
+        String safePath = fileSyncService.sanitizeUserPath(path);
         String t = type.toUpperCase();
 
-        if (!t.equals("FILE") && !t.equals("FOLDER")) {
-            throw new IllegalArgumentException("Invalid type");
+        if ("FILE".equals(t)) {
+            accessManager.require(projectId, userId, ProjectPermission.CREATE_FILE);
+        } else if ("FOLDER".equals(t)) {
+            accessManager.require(projectId, userId, ProjectPermission.CREATE_FOLDER);
+        } else {
+            throw new IllegalArgumentException("Invalid type: " + type);
         }
 
-        if (fileRepo.findByProjectIdAndPath(projectId, safe) != null) {
-            throw new IllegalStateException("Already exists");
+        if (fileRepo.existsByProjectIdAndPath(projectId, safePath)) {
+            throw new IllegalStateException("Already exists: " + safePath);
         }
 
         ProjectFile pf = new ProjectFile(
                 UUID.randomUUID(),
                 projectId,
-                safe,
-                t.equals("FILE") ? "" : null,
+                safePath,
+                "FILE".equals(t) ? "" : null,
                 t
         );
+
         pf.setCreatedAt(Instant.now());
         pf.setUpdatedAt(Instant.now());
         fileRepo.save(pf);
 
-        Path root = projectRoot(projectId);
-        Path resolved = root.resolve(safe).normalize();
-        if (!resolved.startsWith(root)) {
-            throw new IllegalArgumentException("Invalid path");
+        // ---------------- Filesystem (best-effort projection)
+        Path resolved = resolveProjectPath(projectId, safePath);
+
+        try {
+            if ("FOLDER".equals(t)) {
+                Files.createDirectories(resolved);
+            } else {
+                Files.createDirectories(resolved.getParent());
+                Files.writeString(
+                        resolved,
+                        "",
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE_NEW
+                );
+            }
+        } catch (IOException e) {
+            log.error("Filesystem sync failed for {}", safePath, e);
+            // DB is source of truth → do NOT throw
         }
 
-        if (t.equals("FOLDER")) {
-            Files.createDirectories(resolved);
-        } else {
-            Files.createDirectories(resolved.getParent());
-            Files.writeString(
-                    resolved,
-                    "",
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE_NEW
-            );
-        }
-
-        // Sync to active session if present
+        // ---------------- Session sync (non-blocking)
         sessionRegistry.getSessionIdForProject(projectId)
                 .ifPresent(sessionId -> {
                     try {
-                        if (t.equals("FILE")) {
-                            fileSyncService.writeFileToSession(sessionId, safe, "");
+                        if ("FILE".equals(t)) {
+                            fileSyncService.writeFileToSession(
+                                    sessionId,
+                                    safePath,
+                                    ""
+                            );
                         }
                     } catch (Exception e) {
                         log.warn("Session sync failed", e);
@@ -149,7 +135,7 @@ public class FileService {
     }
 
     // ==================================================
-    // SAVE (NORMAL PATH — DEBOUNCED CALLS)
+    // UPDATE
     // ==================================================
 
     @Transactional
@@ -158,45 +144,54 @@ public class FileService {
             String path,
             String content,
             UUID userId
-    ) throws IOException {
+    ) {
 
-        accessManager.requireWrite(projectId, userId);
+        accessManager.require(projectId, userId, ProjectPermission.UPDATE_FILE);
 
-        String safe = validateAndNormalizePath(path);
-        // Force fetch from DB to ensure we have the attached entity
-        ProjectFile file = fileRepo.findByProjectIdAndPath(projectId, safe);
+        String safePath = fileSyncService.sanitizeUserPath(path);
+
+        ProjectFile file =
+                fileRepo.findByProjectIdAndPath(projectId, safePath);
 
         if (file == null) {
-            throw new ResourceNotFoundException("File not found");
+            throw new ResourceNotFoundException("File not found: " + safePath);
         }
 
         if (!"FILE".equalsIgnoreCase(file.getType())) {
             throw new IllegalArgumentException("Not a file");
         }
 
-        // 1. Update physical project storage
-        Path resolved = projectRoot(projectId).resolve(safe).normalize();
-        Files.createDirectories(resolved.getParent());
-        Files.writeString(
-                resolved,
-                content == null ? "" : content,
-                StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.TRUNCATE_EXISTING
-        );
-
-        // 2. Update Database
+        // ---------------- DB FIRST (authoritative)
         file.setContent(content);
         file.setUpdatedAt(Instant.now());
-
-        // Use saveAndFlush to force Hibernate to generate the UPDATE SQL immediately
         fileRepo.saveAndFlush(file);
 
-        // 3. Update active session if present
+        // ---------------- Filesystem SECOND
+        Path resolved = resolveProjectPath(projectId, safePath);
+
+        try {
+            Files.createDirectories(resolved.getParent());
+            Files.writeString(
+                    resolved,
+                    content == null ? "" : content,
+                    StandardCharsets.UTF_8,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING
+            );
+        } catch (IOException e) {
+            log.error("Filesystem write failed for {}", safePath, e);
+            // Do NOT rollback DB
+        }
+
+        // ---------------- Session sync LAST
         sessionRegistry.getSessionIdForProject(projectId)
                 .ifPresent(sessionId -> {
                     try {
-                        fileSyncService.writeFileToSession(sessionId, safe, content);
+                        fileSyncService.writeFileToSession(
+                                sessionId,
+                                safePath,
+                                content
+                        );
                     } catch (Exception e) {
                         log.warn("Session sync failed", e);
                     }
@@ -206,63 +201,19 @@ public class FileService {
     }
 
     // ==================================================
-    // 🔥 FORCED FLUSH (CRITICAL)
+    // HELPERS
     // ==================================================
 
-    /**
-     * Forces a synchronous persistence of a single file.
-     * Used BEFORE execution & snapshot creation.
-     */
-    @Transactional
-    public void flushSingle(UUID projectId, String path) {
+    private Path resolveProjectPath(UUID projectId, String safePath) {
+        Path root = Paths.get(storageProperties.getProjects())
+                .resolve(projectId.toString())
+                .toAbsolutePath()
+                .normalize();
 
-        String safe = validateAndNormalizePath(path);
-
-        ProjectFile file =
-                fileRepo.findByProjectIdAndPath(projectId, safe);
-
-        if (file == null) {
-            throw new ResourceNotFoundException("File not found: " + safe);
+        Path resolved = root.resolve(safePath).normalize();
+        if (!resolved.startsWith(root)) {
+            throw new IllegalArgumentException("Invalid path");
         }
-
-        if (!"FILE".equalsIgnoreCase(file.getType())) {
-            return; // folders are no-op
-        }
-
-        String content = file.getContent() == null ? "" : file.getContent();
-
-        try {
-            // 1️⃣ Persist to project filesystem
-            Path root = projectRoot(projectId);
-            Path resolved = root.resolve(safe).normalize();
-            Files.createDirectories(resolved.getParent());
-            Files.writeString(
-                    resolved,
-                    content,
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING
-            );
-
-            // 2️⃣ Persist to session filesystem if active
-            sessionRegistry.getSessionIdForProject(projectId)
-                    .ifPresent(sessionId -> {
-                        try {
-                            fileSyncService.writeFileToSession(
-                                    sessionId,
-                                    safe,
-                                    content
-                            );
-                        } catch (Exception e) {
-                            log.warn("Session flush failed", e);
-                        }
-                    });
-
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    "Flush failed for file: " + safe,
-                    e
-            );
-        }
+        return resolved;
     }
 }

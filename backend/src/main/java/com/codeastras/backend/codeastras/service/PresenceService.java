@@ -2,7 +2,8 @@ package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.dto.PresenceEvent;
 import com.codeastras.backend.codeastras.dto.PresenceEventType;
-import com.codeastras.backend.codeastras.store.SessionRegistry;
+import com.codeastras.backend.codeastras.security.ProjectAccessManager;
+import com.codeastras.backend.codeastras.security.ProjectPermission;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -16,13 +17,18 @@ public class PresenceService {
 
     private final SessionFacade sessionFacade;
     private final SimpMessagingTemplate messagingTemplate;
+    private final ProjectAccessManager accessManager;
 
     /**
      * Explicit user intent (join project workspace)
      * Called on WS connect / project open
      */
     public void join(UUID projectId, UUID userId) {
-        sessionFacade.userJoined(projectId, userId);
+
+        accessManager.require(projectId, userId, ProjectPermission.READ_PROJECT);
+
+        boolean joined = sessionFacade.userJoined(projectId, userId);
+        if (!joined) return; // idempotent
 
         broadcast(
                 projectId,
@@ -33,13 +39,15 @@ public class PresenceService {
     }
 
     /**
-     * DO NOT call this from WebSocket disconnect.
-     * Disconnects are handled via wsSessionId centrally.
-     *
-     * This is only for explicit UI-driven leave (optional).
+     * Explicit UI-driven leave
+     * (WS disconnects handled elsewhere)
      */
     public void leaveExplicit(UUID projectId, UUID userId) {
-        sessionFacade.userLeft(projectId, userId);
+
+        accessManager.require(projectId, userId, ProjectPermission.READ_PROJECT);
+
+        boolean left = sessionFacade.userLeft(projectId, userId);
+        if (!left) return; // idempotent
 
         broadcast(
                 projectId,
@@ -53,7 +61,12 @@ public class PresenceService {
      * User switched active file
      */
     public void changeFile(UUID projectId, UUID userId, UUID fileId) {
-        sessionFacade.updateFile(projectId, userId, fileId);
+
+        accessManager.require(projectId, userId, ProjectPermission.READ_PROJECT);
+
+        boolean changed =
+                sessionFacade.updateFile(projectId, userId, fileId);
+        if (!changed) return;
 
         broadcast(
                 projectId,
@@ -67,6 +80,10 @@ public class PresenceService {
      * Heartbeat to keep presence alive
      */
     public void heartbeat(UUID projectId, UUID userId) {
+
+        accessManager.require(projectId, userId, ProjectPermission.READ_PROJECT);
+
+        // no broadcast — local liveness only
         sessionFacade.heartbeat(projectId, userId);
     }
 
@@ -74,6 +91,9 @@ public class PresenceService {
      * Full presence sync for late joiners
      */
     public void sync(UUID projectId, UUID userId) {
+
+        accessManager.require(projectId, userId, ProjectPermission.READ_PROJECT);
+
         messagingTemplate.convertAndSendToUser(
                 userId.toString(),
                 "/queue/presence",

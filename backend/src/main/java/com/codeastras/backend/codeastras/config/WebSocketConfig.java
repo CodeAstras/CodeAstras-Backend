@@ -11,34 +11,50 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 @EnableWebSocketMessageBroker
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
-    private final WebSocketPermissionInterceptor webSocketPermissionInterceptor;
+    private final WebSocketPermissionInterceptor permissionInterceptor;
 
-    public WebSocketConfig(WebSocketPermissionInterceptor webSocketPermissionInterceptor) {
-        this.webSocketPermissionInterceptor = webSocketPermissionInterceptor;
+    public WebSocketConfig(WebSocketPermissionInterceptor permissionInterceptor) {
+        this.permissionInterceptor = permissionInterceptor;
     }
+
+    // ==================================================
+    // MESSAGE BROKER
+    // ==================================================
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
+
+        // Simple in-memory broker (OK for now)
         config.enableSimpleBroker("/topic", "/queue");
+
+        // All client SEND must go through /app
         config.setApplicationDestinationPrefixes("/app");
     }
 
+    // ==================================================
+    // STOMP ENDPOINT
+    // ==================================================
+
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        // Native WebSocket endpoint (for tools, frontend, mobile apps)
-        registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*");
 
-        // SockJS endpoint (fallback for legacy browsers)
         registry.addEndpoint("/ws")
-                .setAllowedOriginPatterns("*")
+                // 🔐 Restrict origins (match your frontend)
+                .setAllowedOriginPatterns(
+                        "http://localhost:3000"
+                )
+                // Enable SockJS fallback
                 .withSockJS();
     }
 
+    // ==================================================
+    // INBOUND SECURITY
+    // ==================================================
+
     @Override
-    public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(webSocketPermissionInterceptor);
+    public void configureClientInboundChannel(
+            ChannelRegistration registration
+    ) {
+        registration.interceptors(permissionInterceptor);
     }
-
 }
-

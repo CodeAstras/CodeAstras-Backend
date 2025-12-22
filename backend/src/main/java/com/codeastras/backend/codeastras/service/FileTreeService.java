@@ -6,5 +6,5 @@ import java.util.List;
 import java.util.UUID;
 
 public interface FileTreeService {
-    List<FileNodeDto> getFileTree(UUID projectId, UUID requesterId); // enforces permission
+    List<FileNodeDto> getTree(UUID projectId, UUID userId);
 }

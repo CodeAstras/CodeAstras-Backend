@@ -13,43 +13,48 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class SessionRegistry {
 
-    private final Logger log = LoggerFactory.getLogger(SessionRegistry.class);
+    private static final Logger log =
+            LoggerFactory.getLogger(SessionRegistry.class);
 
     private static final long PRESENCE_TTL_SECONDS = 30;
 
     // ================= SESSION STATE =================
 
     // sessionId -> SessionInfo
-    private final Map<String, SessionInfo> bySessionId = new ConcurrentHashMap<>();
+    private final Map<String, SessionInfo> bySessionId =
+            new ConcurrentHashMap<>();
 
     // projectId -> SessionInfo
-    private final Map<UUID, SessionInfo> byProjectId = new ConcurrentHashMap<>();
+    private final Map<UUID, SessionInfo> byProjectId =
+            new ConcurrentHashMap<>();
 
     // ================= WEBSOCKET MAPPINGS =================
 
     // wsSessionId -> userId
-    private final Map<String, UUID> wsToUser = new ConcurrentHashMap<>();
+    private final Map<String, UUID> wsToUser =
+            new ConcurrentHashMap<>();
 
     // wsSessionId -> projectId
-    private final Map<String, UUID> wsToProject = new ConcurrentHashMap<>();
+    private final Map<String, UUID> wsToProject =
+            new ConcurrentHashMap<>();
 
     // ================= PRESENCE =================
 
-    // projectId -> connected users
-    private final Map<UUID, Set<UUID>> connectedUsers = new ConcurrentHashMap<>();
-
     // projectId -> (userId -> presence)
-    private final Map<UUID, Map<UUID, PresenceInfo>> presence = new ConcurrentHashMap<>();
+    private final Map<UUID, Map<UUID, PresenceInfo>> presence =
+            new ConcurrentHashMap<>();
 
     // ================= MODELS =================
 
     @Getter
     @Setter
     public static class SessionInfo {
+
         private final String sessionId;
         private final String containerName;
         private final UUID projectId;
         private final UUID ownerUserId;
+
         private Instant createdAt;
         private Instant lastSeen;
 
@@ -85,9 +90,13 @@ public class SessionRegistry {
         SessionInfo info =
                 new SessionInfo(sessionId, containerName, projectId, ownerUserId);
 
+        SessionInfo old = byProjectId.get(projectId);
+        if (old != null && !old.getSessionId().equals(sessionId)) {
+            bySessionId.remove(old.getSessionId());
+        }
+
         bySessionId.put(sessionId, info);
         byProjectId.put(projectId, info);
-        connectedUsers.putIfAbsent(projectId, ConcurrentHashMap.newKeySet());
 
         log.info("✅ Registered session {} for project {}", sessionId, projectId);
     }
@@ -96,7 +105,6 @@ public class SessionRegistry {
         SessionInfo info = bySessionId.remove(sessionId);
         if (info != null) {
             byProjectId.remove(info.getProjectId());
-            connectedUsers.remove(info.getProjectId());
             presence.remove(info.getProjectId());
             log.info("🗑 Removed session {}", sessionId);
         }
@@ -121,9 +129,6 @@ public class SessionRegistry {
 
     // ================= WEBSOCKET LIFECYCLE =================
 
-    /**
-     * MUST be called on WebSocket connect / subscribe
-     */
     public void wsUserJoined(
             String wsSessionId,
             UUID projectId,
@@ -138,60 +143,101 @@ public class SessionRegistry {
 
         userJoined(projectId, userId);
 
-        log.debug(
-                "🟢 WS {} joined project {} as user {}",
-                wsSessionId, projectId, userId
-        );
+        log.debug("🟢 WS {} joined project {}", wsSessionId, projectId);
     }
 
-    /**
-     * SAFE disconnect handler — can be called multiple times
-     */
     public void wsUserLeft(String wsSessionId) {
 
-        if (wsSessionId == null) {
-            return;
-        }
+        if (wsSessionId == null) return;
 
         UUID projectId = wsToProject.remove(wsSessionId);
         UUID userId = wsToUser.remove(wsSessionId);
 
-        if (projectId == null || userId == null) {
-            // Disconnect before full registration — normal
-            return;
+        if (projectId != null && userId != null) {
+            userLeft(projectId, userId);
+            log.debug("🔴 WS {} left project {}", wsSessionId, projectId);
         }
-
-        userLeft(projectId, userId);
-
-        log.debug(
-                "🔴 WS {} left project {} (user {})",
-                wsSessionId, projectId, userId
-        );
     }
 
     // ================= PRESENCE =================
 
-    public void userJoined(UUID projectId, UUID userId) {
-        presence
-                .computeIfAbsent(projectId, k -> new ConcurrentHashMap<>())
+    /**
+     * @return true if this was a NEW join
+     */
+    public boolean userJoined(UUID projectId, UUID userId) {
+
+        presence.computeIfAbsent(
+                projectId,
+                k -> new ConcurrentHashMap<>()
+        );
+
+        boolean isNew =
+                !presence.get(projectId).containsKey(userId);
+
+        presence.get(projectId)
                 .put(userId, new PresenceInfo(userId, null, Instant.now()));
 
-        connectedUsers
-                .computeIfAbsent(projectId, k -> ConcurrentHashMap.newKeySet())
-                .add(userId);
+        return isNew;
     }
 
-    public void userLeft(UUID projectId, UUID userId) {
+    /**
+     * @return true if user was present and removed
+     */
+    public boolean userLeft(UUID projectId, UUID userId) {
+
         Map<UUID, PresenceInfo> users = presence.get(projectId);
-        if (users != null) {
-            users.remove(userId);
-            if (users.isEmpty()) {
-                presence.remove(projectId);
-                connectedUsers.remove(projectId);
-            }
+        if (users == null) return false;
+
+        boolean removed = users.remove(userId) != null;
+
+        if (users.isEmpty()) {
+            presence.remove(projectId);
         }
+
+        return removed;
     }
 
+    /**
+     * @return true if active file changed
+     */
+    public boolean updateFile(UUID projectId, UUID userId, UUID fileId) {
+
+        presence.computeIfAbsent(
+                projectId,
+                k -> new ConcurrentHashMap<>()
+        );
+
+        PresenceInfo prev = presence.get(projectId).get(userId);
+
+        boolean changed =
+                prev == null || !Objects.equals(prev.fileId(), fileId);
+
+        presence.get(projectId)
+                .put(userId, new PresenceInfo(userId, fileId, Instant.now()));
+
+        return changed;
+    }
+
+    public void heartbeat(UUID projectId, UUID userId) {
+
+        presence.computeIfAbsent(
+                projectId,
+                k -> new ConcurrentHashMap<>()
+        );
+
+        presence.get(projectId)
+                .put(userId, new PresenceInfo(userId, null, Instant.now()));
+    }
+
+    public Collection<PresenceInfo> getPresenceSnapshot(UUID projectId) {
+        return presence
+                .getOrDefault(projectId, Map.of())
+                .values();
+    }
+
+    /**
+     * 🔥 HARD CLEANUP — user logs out / token revoked
+     */
     public void userLeftEverywhere(UUID userId) {
 
         for (UUID projectId : new HashSet<>(presence.keySet())) {
@@ -203,39 +249,22 @@ public class SessionRegistry {
 
             if (users.isEmpty()) {
                 presence.remove(projectId);
-                connectedUsers.remove(projectId);
             }
         }
 
-        log.debug("User {} left all projects", userId);
-    }
-
-
-    public void updateFile(UUID projectId, UUID userId, UUID fileId) {
-        presence
-                .computeIfAbsent(projectId, k -> new ConcurrentHashMap<>())
-                .put(userId, new PresenceInfo(userId, fileId, Instant.now()));
-    }
-
-    // Heartbeat to prevent false disconnects
-    public void heartbeat(UUID projectId, UUID userId) {
-        presence
-                .computeIfAbsent(projectId, k -> new ConcurrentHashMap<>())
-                .put(userId, new PresenceInfo(userId, null, Instant.now()));
-    }
-
-    public Collection<PresenceInfo> getPresenceSnapshot(UUID projectId) {
-        return presence.getOrDefault(projectId, Map.of()).values();
+        log.debug("User {} removed from all projects", userId);
     }
 
     // ================= TTL CLEANUP =================
 
     public void cleanupStalePresence() {
+
         Instant now = Instant.now();
 
-        for (var entry : presence.entrySet()) {
-            UUID projectId = entry.getKey();
-            Map<UUID, PresenceInfo> users = entry.getValue();
+        for (UUID projectId : new HashSet<>(presence.keySet())) {
+
+            Map<UUID, PresenceInfo> users = presence.get(projectId);
+            if (users == null) continue;
 
             users.entrySet().removeIf(e ->
                     e.getValue()
@@ -246,7 +275,6 @@ public class SessionRegistry {
 
             if (users.isEmpty()) {
                 presence.remove(projectId);
-                connectedUsers.remove(projectId);
             }
         }
     }

@@ -51,7 +51,9 @@ public class FileSyncService {
             throw new IllegalArgumentException("Path cannot be empty");
         }
 
-        String cleaned = userPath.replace("\\", "/");
+        String cleaned = userPath
+                .replace("\\", "/")
+                .replaceAll("/{2,}", "/");
 
         if (cleaned.contains("..") || cleaned.contains("\0")) {
             throw new IllegalArgumentException("Invalid path traversal");
@@ -76,33 +78,36 @@ public class FileSyncService {
 
         log.info("🔁 Syncing project {} → session {}", projectId, sessionDir);
 
-        List<ProjectFile> files =
-                fileRepo.findByProjectId(projectId);
+        List<ProjectFile> files = fileRepo.findByProjectId(projectId);
 
         for (ProjectFile f : files) {
 
             String safePath = sanitizeUserPath(f.getPath());
             Path resolved = resolvePathSafely(sessionDir, safePath);
 
-            if ("FOLDER".equalsIgnoreCase(f.getType())) {
-                Files.createDirectories(resolved);
-                continue;
+            try {
+                if ("FOLDER".equalsIgnoreCase(f.getType())) {
+                    Files.createDirectories(resolved);
+                    continue;
+                }
+
+                Files.createDirectories(resolved.getParent());
+
+                Files.writeString(
+                        resolved,
+                        f.getContent() == null ? "" : f.getContent(),
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING
+                );
+            } catch (IOException e) {
+                log.error("Failed to sync file {} to session {}", safePath, sessionId, e);
             }
-
-            Files.createDirectories(resolved.getParent());
-
-            Files.writeString(
-                    resolved,
-                    f.getContent() == null ? "" : f.getContent(),
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING
-            );
         }
     }
 
     // ==================================================
-    // 🔥 LIVE FILE UPDATE (DO NOT REMOVE)
+    // 🔥 LIVE FILE UPDATE
     // ==================================================
 
     public void writeFileToSession(
@@ -137,10 +142,9 @@ public class FileSyncService {
 
         Files.createDirectories(snapshotDir);
 
-        // 🔥 CRITICAL: Clear the persistence context to ensure we don't read stale/cached entities
+        // 🔥 Ensure no stale entities
         entityManager.clear();
 
-        // Fetching directly to ensure we bypass any potential stale L1 cache
         List<ProjectFile> files = fileRepo.findByProjectId(projectId);
 
         if (files.isEmpty()) {
@@ -148,30 +152,31 @@ public class FileSyncService {
         }
 
         for (ProjectFile f : files) {
-            // Log the content length to verify what is being written to the temporary folder
-            log.info("📂 Snapshotting: {} | Content Length: {}", f.getPath(), 
-                f.getContent() != null ? f.getContent().length() : 0);
 
             String safePath = sanitizeUserPath(f.getPath());
             Path resolved = resolvePathSafely(snapshotDir, safePath);
 
-            if ("FOLDER".equalsIgnoreCase(f.getType())) {
-                Files.createDirectories(resolved);
-                continue;
+            try {
+                if ("FOLDER".equalsIgnoreCase(f.getType())) {
+                    Files.createDirectories(resolved);
+                    continue;
+                }
+
+                Files.createDirectories(resolved.getParent());
+
+                String content = f.getContent() == null ? "" : f.getContent();
+
+                Files.writeString(
+                        resolved,
+                        content,
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING
+                );
+            } catch (IOException e) {
+                log.error("Snapshot write failed for {}", safePath, e);
+                throw e; // snapshot must be correct or fail hard
             }
-
-            Files.createDirectories(resolved.getParent());
-
-            String content = f.getContent() == null ? "" : f.getContent();
-            log.info("📝 Writing to snapshot: {} (size: {})", safePath, content.length());
-
-            Files.writeString(
-                    resolved,
-                    content,
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING
-            );
         }
     }
 
@@ -212,6 +217,4 @@ public class FileSyncService {
         }
         return target;
     }
-
-
 }
