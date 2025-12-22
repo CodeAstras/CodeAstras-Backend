@@ -2,6 +2,8 @@ package com.codeastras.backend.codeastras.service;
 
 import com.codeastras.backend.codeastras.entity.ProjectFile;
 import com.codeastras.backend.codeastras.repository.ProjectFileRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,66 +12,115 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
 @Service
 public class FileSyncService {
 
-    private final Logger log = LoggerFactory.getLogger(FileSyncService.class);
+    private static final Logger log =
+            LoggerFactory.getLogger(FileSyncService.class);
 
     private final ProjectFileRepository fileRepo;
     private final Path basePath;
 
-    public FileSyncService(ProjectFileRepository fileRepo,
-                           @Value("${code.runner.base-path:/var/code_sessions}") String basePath) {
+    @PersistenceContext
+    private EntityManager entityManager;
+
+    public FileSyncService(
+            ProjectFileRepository fileRepo,
+            @Value("${code.runner.base-path:/var/code_sessions}") String basePath
+    ) {
         this.fileRepo = fileRepo;
         this.basePath = Paths.get(basePath).toAbsolutePath().normalize();
+
+        try {
+            Files.createDirectories(this.basePath);
+        } catch (IOException e) {
+            throw new RuntimeException("Unable to create session base path", e);
+        }
     }
 
-    // SYNC FULL PROJECT INTO A SESSION DIRECTORY
-    public void syncProjectToSession(UUID projectId, String sessionId) throws IOException {
-        Path sessionDir = getSessionDir(sessionId);
-        log.info("Syncing project {} → session {}", projectId, sessionDir);
+    // ==================================================
+    // CANONICAL PATH SANITIZER (SINGLE SOURCE)
+    // ==================================================
 
+    public String sanitizeUserPath(String userPath) {
+        if (userPath == null || userPath.isBlank()) {
+            throw new IllegalArgumentException("Path cannot be empty");
+        }
+
+        String cleaned = userPath
+                .replace("\\", "/")
+                .replaceAll("/{2,}", "/");
+
+        if (cleaned.contains("..") || cleaned.contains("\0")) {
+            throw new IllegalArgumentException("Invalid path traversal");
+        }
+
+        if (cleaned.startsWith("/")) {
+            cleaned = cleaned.substring(1);
+        }
+
+        return cleaned;
+    }
+
+    // ==================================================
+    // COLLAB SESSION SYNC
+    // ==================================================
+
+    public void syncProjectToSession(UUID projectId, String sessionId)
+            throws IOException {
+
+        Path sessionDir = getSessionDir(sessionId);
         Files.createDirectories(sessionDir);
+
+        log.info("🔁 Syncing project {} → session {}", projectId, sessionDir);
 
         List<ProjectFile> files = fileRepo.findByProjectId(projectId);
 
         for (ProjectFile f : files) {
 
-            Path resolved = resolvePathSafely(sessionDir, f.getPath());
+            String safePath = sanitizeUserPath(f.getPath());
+            Path resolved = resolvePathSafely(sessionDir, safePath);
 
-            if ("FOLDER".equalsIgnoreCase(f.getType())) {
-                Files.createDirectories(resolved);
-                continue;
-            }
+            try {
+                if ("FOLDER".equalsIgnoreCase(f.getType())) {
+                    Files.createDirectories(resolved);
+                    continue;
+                }
 
-            if (resolved.getParent() != null) {
                 Files.createDirectories(resolved.getParent());
+
+                Files.writeString(
+                        resolved,
+                        f.getContent() == null ? "" : f.getContent(),
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING
+                );
+            } catch (IOException e) {
+                log.error("Failed to sync file {} to session {}", safePath, sessionId, e);
             }
-
-            String content = f.getContent() == null ? "" : f.getContent();
-
-            Files.writeString(
-                    resolved,
-                    content,
-                    StandardCharsets.UTF_8,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING
-            );
         }
     }
 
+    // ==================================================
+    // 🔥 LIVE FILE UPDATE
+    // ==================================================
 
-    // WRITE A SINGLE FILE INTO THE SESSION
-    public void writeFileToSession(String sessionId, String path, String content) throws IOException {
+    public void writeFileToSession(
+            String sessionId,
+            String userPath,
+            String content
+    ) throws IOException {
+
         Path sessionDir = getSessionDir(sessionId);
-        Path resolved = resolvePathSafely(sessionDir, path);
+        String safePath = sanitizeUserPath(userPath);
+        Path resolved = resolvePathSafely(sessionDir, safePath);
 
-        if (resolved.getParent() != null) {
-            Files.createDirectories(resolved.getParent());
-        }
+        Files.createDirectories(resolved.getParent());
 
         Files.writeString(
                 resolved,
@@ -79,55 +130,91 @@ public class FileSyncService {
                 StandardOpenOption.TRUNCATE_EXISTING
         );
 
-        log.debug("✍ Updated file {} in session {}", resolved, sessionId);
+        log.debug("✍ Updated {} in session {}", safePath, sessionId);
     }
 
-    // DELETE SESSION FOLDER
+    // ==================================================
+    // EXECUTION SNAPSHOT (IMMUTABLE)
+    // ==================================================
+
+    public void writeProjectSnapshot(UUID projectId, Path snapshotDir)
+            throws IOException {
+
+        Files.createDirectories(snapshotDir);
+
+        // 🔥 Ensure no stale entities
+        entityManager.clear();
+
+        List<ProjectFile> files = fileRepo.findByProjectId(projectId);
+
+        if (files.isEmpty()) {
+            throw new IllegalStateException("Project has no files");
+        }
+
+        for (ProjectFile f : files) {
+
+            String safePath = sanitizeUserPath(f.getPath());
+            Path resolved = resolvePathSafely(snapshotDir, safePath);
+
+            try {
+                if ("FOLDER".equalsIgnoreCase(f.getType())) {
+                    Files.createDirectories(resolved);
+                    continue;
+                }
+
+                Files.createDirectories(resolved.getParent());
+
+                String content = f.getContent() == null ? "" : f.getContent();
+
+                Files.writeString(
+                        resolved,
+                        content,
+                        StandardCharsets.UTF_8,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING
+                );
+            } catch (IOException e) {
+                log.error("Snapshot write failed for {}", safePath, e);
+                throw e; // snapshot must be correct or fail hard
+            }
+        }
+    }
+
+    // ==================================================
+    // SESSION CLEANUP
+    // ==================================================
+
     public void removeSessionFolder(String sessionId) throws IOException {
-        Path dir = getSessionDir(sessionId);
 
-        if (!Files.exists(dir)) return;
+        Path sessionDir = getSessionDir(sessionId);
+        if (!Files.exists(sessionDir)) return;
 
-        log.info("🗑 Removing session folder {}", dir);
+        log.info("🗑 Removing session folder {}", sessionDir);
 
-        Files.walk(dir)
-                .sorted((a, b) -> b.compareTo(a)) // delete deepest/files first
-                .forEach(path -> {
+        Files.walk(sessionDir)
+                .sorted(Comparator.reverseOrder())
+                .forEach(p -> {
                     try {
-                        Files.deleteIfExists(path);
+                        Files.deleteIfExists(p);
                     } catch (IOException e) {
-                        log.warn("Could not delete {}", path);
+                        log.warn("Failed to delete {}", p);
                     }
                 });
     }
 
+    // ==================================================
+    // INTERNAL HELPERS
+    // ==================================================
 
-    // HELPER: GET SESSION DIRECTORY
     private Path getSessionDir(String sessionId) {
-        return basePath.resolve(sessionId).toAbsolutePath().normalize();
+        return basePath.resolve(sessionId).normalize();
     }
 
-    // HELPER: SAFE PATH RESOLUTION
-    private Path resolvePathSafely(Path sessionDir, String userPath) {
-
-        String cleaned = (userPath == null || userPath.isBlank()) ? "main.py" : userPath;
-
-        // Check AFTER cleaning
-        if (cleaned.contains("..") || cleaned.contains("\\")) {
-            throw new IllegalArgumentException("Invalid path");
+    private Path resolvePathSafely(Path baseDir, String safePath) {
+        Path target = baseDir.resolve(safePath).normalize();
+        if (!target.startsWith(baseDir)) {
+            throw new IllegalArgumentException("Path traversal detected");
         }
-
-        if (cleaned.startsWith("/")) {
-            cleaned = cleaned.substring(1);
-        }
-
-        Path target = sessionDir.resolve(cleaned).normalize();
-
-        if (!target.startsWith(sessionDir)) {
-            throw new IllegalArgumentException("Invalid path traversal");
-        }
-
         return target;
     }
-
 }

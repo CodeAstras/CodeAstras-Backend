@@ -1,24 +1,27 @@
 package com.codeastras.backend.codeastras.dto;
 
+import lombok.Getter;
+
+@Getter
 public class RunCodeBroadcastMessage {
-    private String output;
-    private int exitCode;
-    private String triggeredBy;
 
-    public RunCodeBroadcastMessage() {}
+    private final String sessionId;
+    private final String type;       // RUN_STARTED | RUN_OUTPUT | RUN_FINISHED | RUN_ERROR
+    private final String output;     // only for RUN_OUTPUT
+    private final Integer exitCode;  // only for RUN_FINISHED
+    private final String triggeredBy;
 
-    public RunCodeBroadcastMessage(String output, int exitCode, String triggeredBy) {
+    public RunCodeBroadcastMessage(
+            String sessionId,
+            String type,
+            String output,
+            Integer exitCode,
+            String triggeredBy
+    ) {
+        this.sessionId = sessionId;
+        this.type = type;
         this.output = output;
         this.exitCode = exitCode;
         this.triggeredBy = triggeredBy;
     }
-
-    public String getOutput() { return output; }
-    public void setOutput(String output) { this.output = output; }
-
-    public int getExitCode() { return exitCode; }
-    public void setExitCode(int exitCode) { this.exitCode = exitCode; }
-
-    public String getTriggeredBy() { return triggeredBy; }
-    public void setTriggeredBy(String triggeredBy) { this.triggeredBy = triggeredBy; }
 }
