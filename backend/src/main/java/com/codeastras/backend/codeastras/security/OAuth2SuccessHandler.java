@@ -1,10 +1,12 @@
 package com.codeastras.backend.codeastras.security;
 
 import com.codeastras.backend.codeastras.config.OAuth2Config;
-import com.codeastras.backend.codeastras.entity.RefreshToken;
+import com.codeastras.backend.codeastras.security.CookieFactory;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.codeastras.backend.codeastras.entity.User;
 import com.codeastras.backend.codeastras.repository.RefreshTokenRepository;
 import com.codeastras.backend.codeastras.repository.UserRepository;
+import com.codeastras.backend.codeastras.service.AuthService;
 import com.codeastras.backend.codeastras.service.UsernameGenerationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -37,6 +39,8 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwt;
     private final OAuth2Config oauth2Config;
+    private final AuthService authService;
+
 
     public OAuth2SuccessHandler(
             UserRepository userRepo,
@@ -44,7 +48,7 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
             UsernameGenerationService usernameService,
             PasswordEncoder passwordEncoder,
             JwtUtils jwt,
-            OAuth2Config oauth2Config
+            OAuth2Config oauth2Config, AuthService authService
     ) {
         this.userRepo = userRepo;
         this.refreshRepo = refreshRepo;
@@ -52,6 +56,7 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
         this.passwordEncoder = passwordEncoder;
         this.jwt = jwt;
         this.oauth2Config = oauth2Config;
+        this.authService = authService;
     }
 
     @Override
@@ -59,6 +64,7 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
                                         HttpServletResponse response,
                                         Authentication auth) throws IOException {
 
+        SecurityContextHolder.clearContext();
         OAuth2AuthenticationToken oauth = (OAuth2AuthenticationToken) auth;
         OAuth2User oauthUser = oauth.getPrincipal();
 
@@ -86,33 +92,19 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
             return userRepo.save(u);
         });
 
-        // ---- Refresh Token & DB session ----
-        UUID sessionId = UUID.randomUUID();
-        String refreshJwt = jwt.generateRefreshToken(user.getId(), sessionId.toString());
-
-        RefreshToken rt = new RefreshToken();
-        rt.setId(UUID.randomUUID());
-        rt.setUserId(user.getId());
-        rt.setSessionId(sessionId.toString());
-        rt.setTokenHash(hash(refreshJwt));
-        rt.setCreatedAt(Instant.now());
-        rt.setExpiresAt(Instant.now().plusMillis(jwt.getRefreshExpirationMs()));
-        rt.setRevoked(false);
-        rt.setUserAgent(request.getHeader("User-Agent"));
-        rt.setIp(request.getRemoteAddr());
-        refreshRepo.save(rt);
+        // ---- Refresh Token & DB session (USE AUTH SERVICE TO AVOID HASHING MISMATCH) ----
+        var gen = authService.createRefreshForUser(
+                    user, 
+                    request.getHeader("User-Agent"), 
+                    request.getRemoteAddr()
+            );
+        String refreshJwt = gen.refreshJwt();
 
         // ---- Access Token ----
         String access = jwt.generateAccessToken(user.getId(), user.getUsername(), user.getEmail());
 
         // ---- Cookie ----
-        ResponseCookie cookie = ResponseCookie.from("refresh_token", refreshJwt)
-                .httpOnly(true)
-                .secure(false)
-                .path("/")
-                .maxAge(Duration.ofMillis(jwt.getRefreshExpirationMs()))
-                .sameSite("Lax")
-                .build();
+        ResponseCookie cookie = CookieFactory.refreshToken(refreshJwt, jwt.getRefreshExpirationMs());
 
         response.setHeader(HttpHeaders.SET_COOKIE, cookie.toString());
 

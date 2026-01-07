@@ -1,8 +1,10 @@
 package com.codeastras.backend.codeastras.controller;
 
+import com.codeastras.backend.codeastras.dto.CreateFileRequest;
 import com.codeastras.backend.codeastras.dto.ProjectFileContentDto;
 import com.codeastras.backend.codeastras.dto.ProjectFileInfoDto;
 import com.codeastras.backend.codeastras.entity.ProjectFile;
+import com.codeastras.backend.codeastras.security.AuthUtil;
 import com.codeastras.backend.codeastras.service.FileService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +17,6 @@ import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/projects")
-@CrossOrigin(origins = "*")
 public class FileController {
 
     private final FileService fileService;
@@ -24,16 +25,18 @@ public class FileController {
         this.fileService = fileService;
     }
 
-    // -------------------------------
-    // Get Entire File Tree
-    // -------------------------------
+    // ------------------------------------------------
+    // Get all files (flat list, DB-based)
+    // ------------------------------------------------
     @GetMapping("/{projectId}/files")
     public ResponseEntity<List<ProjectFileInfoDto>> getProjectFiles(
             @PathVariable UUID projectId,
-            Authentication auth
+            Authentication authentication
     ) {
-        UUID userId = (UUID) auth.getPrincipal();
-        List<ProjectFile> files = fileService.findAllByProjectId(projectId, userId);
+        UUID userId = AuthUtil.requireUserId(authentication);
+
+        List<ProjectFile> files =
+                fileService.findAll(projectId, userId);
 
         return ResponseEntity.ok(
                 files.stream()
@@ -42,54 +45,64 @@ public class FileController {
         );
     }
 
-    // -------------------------------
-    // Load a Specific File
-    // -------------------------------
-    @GetMapping(path ="/{projectId}/file", produces = MediaType.APPLICATION_JSON_VALUE)
+    // ------------------------------------------------
+    // Get single file (content)
+    // ------------------------------------------------
+    @GetMapping(
+            path = "/{projectId}/file",
+            produces = MediaType.APPLICATION_JSON_VALUE
+    )
     public ResponseEntity<ProjectFileContentDto> getFile(
             @PathVariable UUID projectId,
             @RequestParam String path,
-            Authentication auth
+            Authentication authentication
     ) {
-        validatePath(path);
+        UUID userId = AuthUtil.requireUserId(authentication);
 
-        UUID userId = (UUID) auth.getPrincipal();
-        ProjectFile file = fileService.getFile(projectId, path, userId);
+        ProjectFile file =
+                fileService.getFile(projectId, path, userId);
 
         return ResponseEntity.ok(ProjectFileContentDto.from(file));
     }
 
-    // -------------------------------
-    // Save File Content
-    // -------------------------------
+    // ------------------------------------------------
+    // Save file content
+    // ------------------------------------------------
     @PutMapping("/{projectId}/file")
     public ResponseEntity<ProjectFileContentDto> saveFile(
             @PathVariable UUID projectId,
             @RequestParam String path,
             @RequestBody String content,
-            Authentication auth
+            Authentication authentication
     ) throws IOException {
 
-        validatePath(path);
+        UUID userId = AuthUtil.requireUserId(authentication);
 
-        UUID userId = (UUID) auth.getPrincipal();
-        ProjectFile updated = fileService.saveFileContent(projectId, path, content, userId);
+        ProjectFile updated =
+                fileService.save(projectId, path, content, userId);
 
         return ResponseEntity.ok(ProjectFileContentDto.from(updated));
     }
 
-    // -------------------------------
-    // Validation Helper
-    // -------------------------------
-    private void validatePath(String path) {
-        if (path.startsWith("/") || path.startsWith("\\")) {
-            throw new IllegalArgumentException("Path cannot start with slash");
-        }
-        if (path == null || path.isBlank()) {
-            throw new IllegalArgumentException("Path cannot be empty");
-        }
-        if (path.contains("..")) {
-            throw new IllegalArgumentException("Invalid path");
-        }
+    // ------------------------------------------------
+    // Create new file / folder
+    // ------------------------------------------------
+    @PostMapping("/{projectId}/files")
+    public ResponseEntity<ProjectFileInfoDto> createFile(
+            @PathVariable UUID projectId,
+            @RequestBody CreateFileRequest body,
+            Authentication authentication
+    ) throws IOException {
+
+        UUID userId = AuthUtil.requireUserId(authentication);
+
+        ProjectFile file = fileService.createFile(
+                projectId,
+                body.getPath(),
+                body.getType(),
+                userId
+        );
+
+        return ResponseEntity.ok(ProjectFileInfoDto.from(file));
     }
 }

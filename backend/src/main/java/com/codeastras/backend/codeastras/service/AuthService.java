@@ -28,12 +28,13 @@ public class AuthService {
     private final UsernameGenerationService usernameService;
     private final RefreshTokenRepository refreshTokenRepo;
 
-    public AuthService(UserRepository userRepo,
-                       PasswordEncoder passwordEncoder,
-                       JwtUtils jwt,
-                       UsernameGenerationService usernameService,
-                       RefreshTokenRepository refreshTokenRepo) {
-
+    public AuthService(
+            UserRepository userRepo,
+            PasswordEncoder passwordEncoder,
+            JwtUtils jwt,
+            UsernameGenerationService usernameService,
+            RefreshTokenRepository refreshTokenRepo
+    ) {
         this.userRepo = userRepo;
         this.passwordEncoder = passwordEncoder;
         this.jwt = jwt;
@@ -41,44 +42,43 @@ public class AuthService {
         this.refreshTokenRepo = refreshTokenRepo;
     }
 
-    // --------------------------
+    // ==================================================
     // SIGNUP
-    // --------------------------
+    // ==================================================
     @Transactional
     public String signup(SignupRequest req) {
-        String fullName = req.getFullName().trim();
-        String email = req.getEmail().trim().toLowerCase(Locale.ROOT);
-        String rawUsername = Optional.ofNullable(req.getUsername())
-                .orElse("")
-                .trim()
-                .toLowerCase(Locale.ROOT);
 
+        String email = req.getEmail().trim().toLowerCase(Locale.ROOT);
         if (userRepo.existsByEmail(email)) {
             throw new IllegalArgumentException("email already in use");
         }
 
-        String base = rawUsername.isBlank() ?
-                usernameService.suggestFromNameOrEmail(fullName, email) :
-                rawUsername;
-
-        base = base.replaceAll("[^a-z0-9._]", "");
-        if (base.length() < 3) base += "01";
+        String base = usernameService
+                .suggestFromNameOrEmail(req.getFullName(), email);
 
         String username = usernameService.generateAvailableUsername(base);
 
-        String hashed = passwordEncoder.encode(req.getPassword());
-
-        User saved = userRepo.save(
-                new User(fullName, username, email, hashed)
+        User user = userRepo.save(
+                new User(
+                        req.getFullName().trim(),
+                        username,
+                        email,
+                        passwordEncoder.encode(req.getPassword())
+                )
         );
 
-        return jwt.generateAccessToken(saved.getId(), saved.getUsername(), saved.getEmail());
+        return jwt.generateAccessToken(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail()
+        );
     }
 
-    // --------------------------
+    // ==================================================
     // LOGIN
-    // --------------------------
+    // ==================================================
     public String login(LoginRequest req) {
+
         User user = userRepo.findByEmail(req.getEmail().toLowerCase(Locale.ROOT))
                 .orElseThrow(() -> new IllegalArgumentException("invalid credentials"));
 
@@ -86,91 +86,109 @@ public class AuthService {
             throw new IllegalArgumentException("invalid credentials");
         }
 
-        return jwt.generateAccessToken(user.getId(), user.getUsername(), user.getEmail());
+        return jwt.generateAccessToken(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail()
+        );
     }
 
-    // --------------------------
-    // CREATE REFRESH SESSION
-    // --------------------------
+    // ==================================================
+    // CREATE REFRESH SESSION (IMMUTABLE)
+    // ==================================================
     @Transactional
-    public GeneratedRefresh createRefreshForUser(User user, String userAgent, String ip) {
-        UUID sessionId = UUID.randomUUID();
+    public GeneratedRefresh createRefreshForUser(
+            User user,
+            String userAgent,
+            String ip
+    ) {
 
-        // 1. Generate refresh JWT
-        String refreshJwt = jwt.generateRefreshToken(user.getId(), sessionId.toString());
+        String sessionId = UUID.randomUUID().toString();
 
-        // 2. Hash the JWT for DB storage
-        String hash = sha256Base64(refreshJwt);
+        String refreshJwt =
+                jwt.generateRefreshToken(user.getId(), sessionId);
 
         RefreshToken rt = new RefreshToken();
         rt.setId(UUID.randomUUID());
         rt.setUserId(user.getId());
-        rt.setSessionId(sessionId.toString());
-        rt.setTokenHash(hash);
+        rt.setSessionId(sessionId);
+        rt.setTokenHash(hash(refreshJwt));
         rt.setCreatedAt(Instant.now());
-        rt.setExpiresAt(Instant.now().plusMillis(getRefreshExpiryMs()));
+        rt.setExpiresAt(
+                Instant.now().plusMillis(jwt.getRefreshExpirationMs())
+        );
         rt.setRevoked(false);
         rt.setUserAgent(userAgent);
         rt.setIp(ip);
 
         refreshTokenRepo.save(rt);
 
-        return new GeneratedRefresh(sessionId.toString(), refreshJwt);
+        return new GeneratedRefresh(sessionId, refreshJwt);
     }
 
     public record GeneratedRefresh(String sessionId, String refreshJwt) {}
 
-    public long getRefreshExpiryMs() {
-        return 7L * 24 * 60 * 60 * 1000;
-    }
-
-    // --------------------------
-    // ROTATE REFRESH TOKEN
-    // --------------------------
+    // ==================================================
+    // ROTATE REFRESH TOKEN (SAFE)
+    // ==================================================
     @Transactional
-    public RotatedTokens rotateRefresh(String oldSessionId, String userAgent, String ip) {
+    public RotatedTokens rotateRefresh(
+            String oldSessionId,
+            String userAgent,
+            String ip
+    ) {
 
-        RefreshToken old = refreshTokenRepo.findBySessionId(oldSessionId)
-                .orElseThrow(() -> new IllegalArgumentException("invalid refresh session"));
+        RefreshToken old =
+                refreshTokenRepo
+                        .findBySessionIdAndRevokedFalse(oldSessionId)
+                        .orElseThrow(() ->
+                                new IllegalArgumentException("invalid refresh session"));
 
-        if (old.isRevoked() || old.getExpiresAt().isBefore(Instant.now())) {
-            throw new IllegalArgumentException("refresh token expired or revoked");
+        if (old.getExpiresAt().isBefore(Instant.now())) {
+            throw new IllegalArgumentException("refresh token expired");
         }
 
-        old.setRevoked(true);
-        refreshTokenRepo.save(old);
+        // 🔥 SAFE: revoke via UPDATE QUERY
+        refreshTokenRepo.revokeBySessionId(oldSessionId);
 
         User user = userRepo.findById(old.getUserId())
-                .orElseThrow(() -> new IllegalArgumentException("user not found"));
+                .orElseThrow(() -> new IllegalStateException("user not found"));
 
-        GeneratedRefresh gen = createRefreshForUser(user, userAgent, ip);
+        GeneratedRefresh gen =
+                createRefreshForUser(user, userAgent, ip);
 
-        String newAccess = jwt.generateAccessToken(user.getId(), user.getUsername(), user.getEmail());
+        String newAccess =
+                jwt.generateAccessToken(
+                        user.getId(),
+                        user.getUsername(),
+                        user.getEmail()
+                );
 
         return new RotatedTokens(newAccess, gen.refreshJwt());
     }
 
     public record RotatedTokens(String accessToken, String refreshJwt) {}
 
-    // --------------------------
+    // ==================================================
     // LOGOUT
-    // --------------------------
+    // ==================================================
     @Transactional
     public void revokeSession(String sessionId) {
-        refreshTokenRepo.findBySessionId(sessionId).ifPresent(rt -> {
-            rt.setRevoked(true);
-            refreshTokenRepo.save(rt);
-        });
+        refreshTokenRepo.revokeBySessionId(sessionId);
     }
 
-    private String sha256Base64(String input) {
+    // ==================================================
+    // HASHING
+    // ==================================================
+    private String hash(String token) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             return Base64.getEncoder().encodeToString(
-                    md.digest(input.getBytes(StandardCharsets.UTF_8))
+                    md.digest(token.getBytes(StandardCharsets.UTF_8))
             );
         } catch (Exception e) {
             throw new RuntimeException("Failed to hash refresh token", e);
         }
     }
+
 }
