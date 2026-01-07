@@ -36,7 +36,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String path = request.getRequestURI();
 
-        // ⛔ DO NOT clear context for public paths
         if (isPublicPath(path)) {
             filterChain.doFilter(request, response);
             return;
