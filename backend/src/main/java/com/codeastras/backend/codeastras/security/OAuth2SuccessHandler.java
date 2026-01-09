@@ -1,12 +1,11 @@
 package com.codeastras.backend.codeastras.security;
 
 import com.codeastras.backend.codeastras.config.OAuth2Config;
-import com.codeastras.backend.codeastras.security.CookieFactory;
 import org.springframework.security.core.context.SecurityContextHolder;
-import com.codeastras.backend.codeastras.entity.User;
-import com.codeastras.backend.codeastras.repository.RefreshTokenRepository;
+import com.codeastras.backend.codeastras.entity.auth.User;
+import com.codeastras.backend.codeastras.repository.auth.RefreshTokenRepository;
 import com.codeastras.backend.codeastras.repository.UserRepository;
-import com.codeastras.backend.codeastras.service.AuthService;
+import com.codeastras.backend.codeastras.service.auth.AuthService;
 import com.codeastras.backend.codeastras.service.UsernameGenerationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,8 +22,6 @@ import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.Optional;

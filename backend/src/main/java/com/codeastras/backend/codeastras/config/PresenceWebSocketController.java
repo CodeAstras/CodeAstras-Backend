@@ -1,7 +1,7 @@
 package com.codeastras.backend.codeastras.config;
 
 import com.codeastras.backend.codeastras.security.AuthUtil;
-import com.codeastras.backend.codeastras.service.PresenceService;
+import com.codeastras.backend.codeastras.service.presence.PresenceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
