@@ -63,9 +63,11 @@ public class AuthService {
                         req.getFullName().trim(),
                         username,
                         email,
-                        passwordEncoder.encode(req.getPassword())
+                        passwordEncoder.encode(req.getPassword()),
+                        "LOCAL"
                 )
         );
+
 
         return jwt.generateAccessToken(
                 user.getId(),
@@ -148,7 +150,7 @@ public class AuthService {
             throw new IllegalArgumentException("refresh token expired");
         }
 
-        // 🔥 SAFE: revoke via UPDATE QUERY
+        // SAFE: revoke via UPDATE QUERY
         refreshTokenRepo.revokeBySessionId(oldSessionId);
 
         User user = userRepo.findById(old.getUserId())

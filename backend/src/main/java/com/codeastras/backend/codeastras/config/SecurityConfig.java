@@ -5,6 +5,7 @@ import com.codeastras.backend.codeastras.security.*;
 import com.codeastras.backend.codeastras.service.auth.CustomOAuth2UserService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -34,20 +35,14 @@ public class SecurityConfig {
         this.customOAuth2UserService = customOAuth2UserService;
     }
 
-    // ==================================================
     // OAuth2 STATE (COOKIE-BASED)
-    // ==================================================
-
     @Bean
     public HttpCookieOAuth2AuthorizationRequestRepository
     oAuth2AuthorizationRequestRepository() {
         return new HttpCookieOAuth2AuthorizationRequestRepository();
     }
 
-    // ==================================================
     // SECURITY FILTER CHAIN
-    // ==================================================
-
     @Bean
     public SecurityFilterChain filterChain(
             HttpSecurity http,
@@ -59,7 +54,7 @@ public class SecurityConfig {
                 new JwtAuthenticationFilter(jwt, userRepository);
 
         http
-                // ---------------- CORS ----------------
+                // CORS
                 .cors(cors -> cors.configurationSource(request -> {
                     CorsConfiguration cfg = new CorsConfiguration();
 
@@ -80,21 +75,24 @@ public class SecurityConfig {
                     return cfg;
                 }))
 
-                // ---------------- CSRF / SESSION ----------------
+                // CSRF / SESSION
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                // ---------------- AUTHZ ----------------
+                //  AUTHORIZATION
                 .authorizeHttpRequests(auth -> auth
 
-                        // Public auth endpoints
-                        .requestMatchers("/api/auth/**").permitAll()
 
-                        // OAuth2 endpoints
+                        // PUBLIC ENDPOINTS
+                        // Public profile (READ ONLY)
+                        .requestMatchers(HttpMethod.GET, "/api/profiles/*").permitAll()
+
+                        // Auth & OAuth
+                        .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/oauth2/**", "/login/**").permitAll()
 
-                        // Health
+                        // Health check
                         .requestMatchers("/api/health").permitAll()
 
                         // WebSocket handshake ONLY
@@ -105,18 +103,21 @@ public class SecurityConfig {
                                 "/ws/info/**"
                         ).permitAll()
 
-                        // Everything else
+                        // PROTECTED PROFILE ENDPOINTS
+                        .requestMatchers("/api/profiles/me/**").authenticated()
+
+                        // EVERYTHING ELSE
                         .anyRequest().authenticated()
                 )
 
-                // ---------------- EXCEPTIONS ----------------
+                // EXCEPTIONS
                 .exceptionHandling(ex ->
                         ex.authenticationEntryPoint(
                                 new RestAuthenticationEntryPoint()
                         )
                 )
 
-                // ---------------- OAUTH2 LOGIN ----------------
+                //OAUTH2 LOGIN
                 .oauth2Login(oauth -> oauth
                         .authorizationEndpoint(a -> a
                                 .authorizationRequestRepository(
@@ -130,7 +131,7 @@ public class SecurityConfig {
                         .failureHandler(oauth2FailureHandler)
                 )
 
-                // ---------------- JWT FILTER ----------------
+                //JWT FILTER
                 // Must come AFTER OAuth2 processing
                 .addFilterBefore(
                         jwtFilter,
@@ -140,10 +141,8 @@ public class SecurityConfig {
         return http.build();
     }
 
-    // ==================================================
-    // AUTH BEANS
-    // ==================================================
 
+    // AUTH BEANS
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();

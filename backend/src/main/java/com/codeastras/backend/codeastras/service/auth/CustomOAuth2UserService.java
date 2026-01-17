@@ -58,17 +58,19 @@ public class CustomOAuth2UserService
             );
         }
 
-        // 🔐 SINGLE LOCAL USER (email is the current trust anchor)
+
+        // SINGLE LOCAL USER (email is the current trust anchor)
         User user = userRepo.findByEmail(email)
                 .map(existing -> updateExistingUser(existing, name))
-                .orElseGet(() -> createNewUser(email, name));
+                .orElseGet(() -> createNewUser(email, name, provider));
 
-        // 🔑 Authorities (future-proof hook)
+
+        // Authorities (future-proof hook)
         Set<GrantedAuthority> authorities = Set.of(
                 new SimpleGrantedAuthority("ROLE_USER")
         );
 
-        // 🔒 Stable principal key (LOCAL user id)
+        // Stable principal key (LOCAL user id)
         String principalKey = "localUserId";
 
         attributes.put(principalKey, user.getId().toString());
@@ -97,20 +99,26 @@ public class CustomOAuth2UserService
         return user;
     }
 
-    private User createNewUser(String email, String name) {
+    private User createNewUser(String email, String name, String provider) {
+
         String base = suggestBaseUsername(name, email);
         String username = usernameService.generateAvailableUsername(base);
 
-        User user = new User();
-        user.setId(UUID.randomUUID());
-        user.setEmail(email);
-        user.setUsername(username);
-        user.setFullName(name != null ? name : email);
-        user.setPasswordHash(null); // OAuth-only
-        user.setCreatedAt(Instant.now());
+        // OAuth users do NOT log in via password
+        // Use a random, unguessable value
+        String randomSecret = UUID.randomUUID().toString();
+
+        User user = new User(
+                name != null ? name : email,
+                username,
+                email,
+                randomSecret,   // will never be used
+                provider        // GITHUB / GOOGLE
+        );
 
         return userRepo.save(user);
     }
+
 
     private String extractProviderUserId(
             OAuth2UserRequest request,
