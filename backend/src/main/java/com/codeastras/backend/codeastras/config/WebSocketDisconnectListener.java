@@ -1,6 +1,6 @@
 package com.codeastras.backend.codeastras.config;
 
-import com.codeastras.backend.codeastras.service.SessionFacade;
+import com.codeastras.backend.codeastras.service.session.SessionFacade;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;

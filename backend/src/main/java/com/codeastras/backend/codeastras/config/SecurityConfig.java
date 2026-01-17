@@ -2,7 +2,7 @@ package com.codeastras.backend.codeastras.config;
 
 import com.codeastras.backend.codeastras.repository.UserRepository;
 import com.codeastras.backend.codeastras.security.*;
-import com.codeastras.backend.codeastras.service.CustomOAuth2UserService;
+import com.codeastras.backend.codeastras.service.auth.CustomOAuth2UserService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;

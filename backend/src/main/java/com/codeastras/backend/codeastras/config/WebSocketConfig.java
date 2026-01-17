@@ -17,10 +17,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         this.permissionInterceptor = permissionInterceptor;
     }
 
-    // ==================================================
     // MESSAGE BROKER
-    // ==================================================
-
     @Override
     public void configureMessageBroker(MessageBrokerRegistry config) {
 
@@ -31,10 +28,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         config.setApplicationDestinationPrefixes("/app");
     }
 
-    // ==================================================
     // STOMP ENDPOINT
-    // ==================================================
-
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
 
@@ -47,10 +41,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 .withSockJS();
     }
 
-    // ==================================================
     // INBOUND SECURITY
-    // ==================================================
-
     @Override
     public void configureClientInboundChannel(
             ChannelRegistration registration

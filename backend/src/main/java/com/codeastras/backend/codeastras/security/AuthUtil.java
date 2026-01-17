@@ -4,10 +4,12 @@ import com.codeastras.backend.codeastras.exception.UnauthorizedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
+import org.springframework.stereotype.Service;
 
 import java.security.Principal;
 import java.util.UUID;
 
+@Service
 public final class AuthUtil {
 
     private static final Logger LOG =
@@ -15,9 +17,7 @@ public final class AuthUtil {
 
     private AuthUtil() {}
 
-    // =========================
     // HTTP / REST AUTH
-    // =========================
     public static UUID requireUserId(Authentication auth) {
         if (auth == null || auth.getPrincipal() == null) {
             throw new UnauthorizedException("No authentication");
@@ -42,9 +42,7 @@ public final class AuthUtil {
         throw new UnauthorizedException("Invalid principal type");
     }
 
-    // =========================
     // WEBSOCKET AUTH
-    // =========================
     public static UUID requireUserId(Principal principal) {
         if (principal == null || principal.getName() == null) {
             throw new UnauthorizedException("No principal");
