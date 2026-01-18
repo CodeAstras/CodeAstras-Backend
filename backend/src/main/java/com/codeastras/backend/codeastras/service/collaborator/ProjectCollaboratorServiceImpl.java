@@ -2,6 +2,7 @@ package com.codeastras.backend.codeastras.service.collaborator;
 
 import com.codeastras.backend.codeastras.entity.auth.User;
 import com.codeastras.backend.codeastras.entity.collaborator.*;
+import com.codeastras.backend.codeastras.entity.collaborator.CollaboratorStatus;
 import com.codeastras.backend.codeastras.entity.project.Project;
 import com.codeastras.backend.codeastras.websocket.publisher.InviteWebSocketPublisher;
 import com.codeastras.backend.codeastras.dto.collaborator.CollaboratorResponse;
@@ -28,276 +29,281 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ProjectCollaboratorServiceImpl implements ProjectCollaboratorService {
 
-    private final ProjectRepository projectRepo;
-    private final UserRepository userRepo;
-    private final ProjectCollaboratorRepository collabRepo;
-    private final ProjectInvitationRepository invitationRepo;
-    private final ProjectAccessManager accessManager;
-    private final InviteWebSocketPublisher inviteWsPublisher;
+        private final ProjectRepository projectRepo;
+        private final UserRepository userRepo;
+        private final ProjectCollaboratorRepository collabRepo;
+        private final ProjectInvitationRepository invitationRepo;
+        private final ProjectAccessManager accessManager;
+        private final InviteWebSocketPublisher inviteWsPublisher;
 
-    // INVITE COLLABORATOR (OWNER ONLY)
-    @Override
-    @Transactional
-    public InvitationResponse inviteCollaborator(
-            UUID projectId,
-            String inviteeEmail,
-            UUID requesterId
-    ) {
-        accessManager.requireOwner(projectId, requesterId);
+        // INVITE COLLABORATOR (OWNER ONLY)
+        @Override
+        @Transactional
+        public InvitationResponse inviteCollaborator(
+                        UUID projectId,
+                        String inviteeEmail,
+                        UUID requesterId) {
+                accessManager.requireOwner(projectId, requesterId);
 
-        Project project = projectRepo.findById(projectId)
-                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
+                Project project = projectRepo.findById(projectId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
 
-        User inviter = userRepo.findById(requesterId)
-                .orElseThrow(() -> new ResourceNotFoundException("Inviter not found"));
+                User inviter = userRepo.findById(requesterId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Inviter not found"));
 
-        User invitedUser = userRepo.findByEmail(inviteeEmail)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("User not found with email: " + inviteeEmail)
-                );
+                User invitedUser = userRepo.findByEmail(inviteeEmail)
+                                .orElseThrow(() -> new ResourceNotFoundException(
+                                                "User not found with email: " + inviteeEmail));
 
-        if (invitedUser.getId().equals(requesterId)) {
-            throw new IllegalStateException("You cannot invite yourself");
+                if (invitedUser.getId().equals(requesterId)) {
+                        throw new IllegalStateException("You cannot invite yourself");
+                }
+
+                collabRepo.findByProjectIdAndUserId(projectId, invitedUser.getId())
+                                .ifPresent(c -> {
+                                        throw new IllegalStateException("User is already a collaborator");
+                                });
+
+                invitationRepo.findByProjectIdAndInviteeId(projectId, invitedUser.getId())
+                                .ifPresent(i -> {
+                                        if (i.getStatus() == InvitationStatus.PENDING) {
+                                                throw new IllegalStateException(
+                                                                "User already has a pending invitation");
+                                        }
+                                });
+
+                ProjectInvitation invite = new ProjectInvitation();
+                invite.setProject(project);
+                invite.setInviter(inviter);
+                invite.setInvitee(invitedUser);
+                invite.setRole(CollaboratorRole.COLLABORATOR);
+                invite.setStatus(InvitationStatus.PENDING);
+                invite.setCreatedAt(Instant.now());
+
+                ProjectInvitation saved = invitationRepo.save(invite);
+
+                // 🔔 REAL-TIME NOTIFICATION (BEFORE RETURN)
+                inviteWsPublisher.notifyUser(
+                                invitedUser.getId(),
+                                new InviteNotification(
+                                                "INVITE_SENT",
+                                                saved.getId(),
+                                                project.getId(),
+                                                project.getName(),
+                                                inviter.getEmail()));
+
+                return new InvitationResponse(
+                                saved.getId(),
+                                project.getId(),
+                                project.getName(),
+                                inviter.getEmail(),
+                                saved.getRole(),
+                                saved.getStatus(),
+                                saved.getCreatedAt());
         }
 
-        collabRepo.findByProjectIdAndUserId(projectId, invitedUser.getId())
-                .ifPresent(c -> {
-                    throw new IllegalStateException("User is already a collaborator");
-                });
+        // ACCEPT INVITATION
+        @Override
+        @Transactional
+        public ProjectCollaborator acceptInvitation(UUID invitationId, UUID userId) {
 
-        invitationRepo.findByProjectIdAndInviteeId(projectId, invitedUser.getId())
-                .ifPresent(i -> {
-                    if (i.getStatus() == InvitationStatus.PENDING) {
-                        throw new IllegalStateException("User already has a pending invitation");
-                    }
-                });
+                ProjectInvitation invite = invitationRepo.findById(invitationId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found"));
 
-        ProjectInvitation invite = new ProjectInvitation();
-        invite.setProject(project);
-        invite.setInviter(inviter);
-        invite.setInvitee(invitedUser);
-        invite.setRole(CollaboratorRole.COLLABORATOR);
-        invite.setStatus(InvitationStatus.PENDING);
-        invite.setCreatedAt(Instant.now());
+                if (!invite.getInvitee().getId().equals(userId)) {
+                        throw new ForbiddenException("Not your invitation");
+                }
 
-        ProjectInvitation saved = invitationRepo.save(invite);
+                if (invite.getStatus() != InvitationStatus.PENDING) {
+                        throw new IllegalStateException("Invitation already resolved");
+                }
 
-        // 🔔 REAL-TIME NOTIFICATION (BEFORE RETURN)
-        inviteWsPublisher.notifyUser(
-                invitedUser.getId(),
-                new InviteNotification(
-                        "INVITE_SENT",
-                        saved.getId(),
-                        project.getId(),
-                        project.getName(),
-                        inviter.getEmail()
-                )
-        );
+                collabRepo.findByProjectIdAndUserId(invite.getProject().getId(), userId)
+                                .ifPresent(c -> {
+                                        throw new IllegalStateException("Already a collaborator");
+                                });
 
-        return new InvitationResponse(
-                saved.getId(),
-                project.getId(),
-                project.getName(),
-                inviter.getEmail(),
-                saved.getRole(),
-                saved.getStatus(),
-                saved.getCreatedAt()
-        );
-    }
+                invite.setStatus(InvitationStatus.ACCEPTED);
+                invite.setRespondedAt(Instant.now());
+                invitationRepo.save(invite);
 
-    // ACCEPT INVITATION
-    @Override
-    @Transactional
-    public ProjectCollaborator acceptInvitation(UUID invitationId, UUID userId) {
+                ProjectCollaborator collaborator = new ProjectCollaborator(invite.getProject(), invite.getInvitee(),
+                                invite.getRole());
 
-        ProjectInvitation invite = invitationRepo.findById(invitationId)
-                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found"));
+                collaborator.setStatus(CollaboratorStatus.ACCEPTED);
+                collaborator.setInvitedAt(invite.getCreatedAt());
+                collaborator.setAcceptedAt(Instant.now());
 
-        if (!invite.getInvitee().getId().equals(userId)) {
-            throw new ForbiddenException("Not your invitation");
+                ProjectCollaborator saved = collabRepo.save(collaborator);
+
+                // 🔔 Notify inviter
+                inviteWsPublisher.notifyUser(
+                                invite.getInviter().getId(),
+                                new InviteNotification(
+                                                "INVITE_ACCEPTED",
+                                                invite.getId(),
+                                                invite.getProject().getId(),
+                                                invite.getProject().getName(),
+                                                invite.getInvitee().getEmail()));
+
+                return saved;
         }
 
-        if (invite.getStatus() != InvitationStatus.PENDING) {
-            throw new IllegalStateException("Invitation already resolved");
+        // REJECT INVITATION
+        @Override
+        @Transactional
+        public void rejectInvitation(UUID invitationId, UUID userId) {
+
+                ProjectInvitation invite = invitationRepo.findById(invitationId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found"));
+
+                if (!invite.getInvitee().getId().equals(userId)) {
+                        throw new ForbiddenException("Not your invitation");
+                }
+
+                if (invite.getStatus() != InvitationStatus.PENDING) {
+                        throw new IllegalStateException("Invitation already resolved");
+                }
+
+                invite.setStatus(InvitationStatus.REJECTED);
+                invite.setRespondedAt(Instant.now());
+                invitationRepo.save(invite);
+
+                // 🔔 Notify inviter
+                inviteWsPublisher.notifyUser(
+                                invite.getInviter().getId(),
+                                new InviteNotification(
+                                                "INVITE_REJECTED",
+                                                invite.getId(),
+                                                invite.getProject().getId(),
+                                                invite.getProject().getName(),
+                                                invite.getInvitee().getEmail()));
         }
 
-        collabRepo.findByProjectIdAndUserId(invite.getProject().getId(), userId)
-                .ifPresent(c -> {
-                    throw new IllegalStateException("Already a collaborator");
-                });
+        // REMOVE COLLABORATOR
+        @Override
+        @Transactional
+        public void removeCollaborator(UUID projectId, UUID targetUserId, UUID requesterId) {
+                if (!requesterId.equals(targetUserId)) {
+                        accessManager.requireOwner(projectId, requesterId);
+                }
 
-        invite.setStatus(InvitationStatus.ACCEPTED);
-        invite.setRespondedAt(Instant.now());
-        invitationRepo.save(invite);
+                // 1. Try to find accepted collaborator
+                var collabOpt = collabRepo.findByProjectIdAndUserId(projectId, targetUserId);
+                if (collabOpt.isPresent()) {
+                        ProjectCollaborator collab = collabOpt.get();
+                        if (collab.getRole() == CollaboratorRole.OWNER) {
+                                long ownerCount = collabRepo.countByProjectIdAndRole(
+                                                projectId,
+                                                CollaboratorRole.OWNER);
+                                if (ownerCount <= 1) { // Changed to 1 to match updateRole logic
+                                        throw new IllegalStateException("Project must have at least one Owner");
+                                }
+                        }
+                        collabRepo.delete(collab);
+                        return;
+                }
 
-        ProjectCollaborator collaborator =
-                new ProjectCollaborator(invite.getProject(), invite.getInvitee(), invite.getRole());
+                // 2. If not found, try to find pending invitation
+                var inviteOpt = invitationRepo.findByProjectIdAndInviteeId(projectId, targetUserId);
+                if (inviteOpt.isPresent()) {
+                        invitationRepo.delete(inviteOpt.get());
+                        return;
+                }
 
-        collaborator.setStatus(CollaboratorStatus.ACCEPTED);
-        collaborator.setInvitedAt(invite.getCreatedAt());
-        collaborator.setAcceptedAt(Instant.now());
-
-        ProjectCollaborator saved = collabRepo.save(collaborator);
-
-        // 🔔 Notify inviter
-        inviteWsPublisher.notifyUser(
-                invite.getInviter().getId(),
-                new InviteNotification(
-                        "INVITE_ACCEPTED",
-                        invite.getId(),
-                        invite.getProject().getId(),
-                        invite.getProject().getName(),
-                        invite.getInvitee().getEmail()
-                )
-        );
-
-        return saved;
-    }
-
-    // REJECT INVITATION
-    @Override
-    @Transactional
-    public void rejectInvitation(UUID invitationId, UUID userId) {
-
-        ProjectInvitation invite = invitationRepo.findById(invitationId)
-                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found"));
-
-        if (!invite.getInvitee().getId().equals(userId)) {
-            throw new ForbiddenException("Not your invitation");
+                // 3. If neither
+                throw new ResourceNotFoundException("Collaborator or invitation not found");
         }
 
-        if (invite.getStatus() != InvitationStatus.PENDING) {
-            throw new IllegalStateException("Invitation already resolved");
+        // LIST PROJECT COLLABORATORS
+        public List<CollaboratorResponse> listProjectCollaborators(
+                        UUID projectId,
+                        UUID requesterId) {
+                accessManager.require(
+                                projectId,
+                                requesterId,
+                                ProjectPermission.READ_COLLABORATORS);
+
+                // 1. Get accepted collaborators
+                List<CollaboratorResponse> collaborators = collabRepo.findAllByProjectId(projectId)
+                                .stream()
+                                .map(c -> new CollaboratorResponse(
+                                                c.getUser().getId(),
+                                                c.getUser().getEmail(),
+                                                c.getRole(),
+                                                c.getStatus(),
+                                                c.getInvitedAt(),
+                                                c.getAcceptedAt()))
+                                .collect(Collectors.toList());
+
+                // 2. Get pending invitations
+                List<CollaboratorResponse> pending = invitationRepo
+                                .findAllByProjectIdAndStatus(projectId, InvitationStatus.PENDING)
+                                .stream()
+                                .map(i -> new CollaboratorResponse(
+                                                i.getInvitee().getId(),
+                                                i.getInvitee().getEmail(),
+                                                i.getRole(),
+                                                CollaboratorStatus.PENDING, // Explicitly map to PENDING status
+                                                i.getCreatedAt(),
+                                                null))
+                                .collect(Collectors.toList());
+
+                // 3. Merge
+                collaborators.addAll(pending);
+                return collaborators;
         }
 
-        invite.setStatus(InvitationStatus.REJECTED);
-        invite.setRespondedAt(Instant.now());
-        invitationRepo.save(invite);
+        // LIST USER PROJECTS (ACCEPTED ONLY)
+        @Override
+        public List<CollaboratorResponse> listUserProjects(UUID userId) {
 
-        // 🔔 Notify inviter
-        inviteWsPublisher.notifyUser(
-                invite.getInviter().getId(),
-                new InviteNotification(
-                        "INVITE_REJECTED",
-                        invite.getId(),
-                        invite.getProject().getId(),
-                        invite.getProject().getName(),
-                        invite.getInvitee().getEmail()
-                )
-        );
-    }
-
-    // REMOVE COLLABORATOR
-    @Override
-    @Transactional
-    public void removeCollaborator(UUID projectId, UUID targetUserId, UUID requesterId) {
-
-        if (!requesterId.equals(targetUserId)) {
-            accessManager.requireOwner(projectId, requesterId);
+                return collabRepo.findAllByUserId(userId)
+                                .stream()
+                                .filter(c -> c.getStatus() == CollaboratorStatus.ACCEPTED)
+                                .map(c -> new CollaboratorResponse(
+                                                c.getProject().getId(),
+                                                c.getProject().getName(),
+                                                c.getRole(),
+                                                c.getStatus(),
+                                                c.getInvitedAt(),
+                                                c.getAcceptedAt()))
+                                .collect(Collectors.toList());
         }
 
-        ProjectCollaborator collab =
-                collabRepo.findByProjectIdAndUserId(projectId, targetUserId)
-                        .orElseThrow(() -> new ResourceNotFoundException("Collaborator not found"));
+        // UPDATE ROLE (OWNER ONLY)
+        @Override
+        @Transactional
+        public ProjectCollaborator updateRole(
+                        UUID projectId,
+                        UUID targetUserId,
+                        CollaboratorRole newRole,
+                        UUID requesterId) {
+                accessManager.requireOwner(projectId, requesterId);
 
-        if (collab.getRole() == CollaboratorRole.OWNER) {
-            long ownerCount = collabRepo.countByProjectIdAndRole(
-                    projectId,
-                    CollaboratorRole.OWNER
-            );
-            if (ownerCount <= 0) {
-                throw new IllegalStateException("Project must have at least one Owner");
-            }
+                ProjectCollaborator collab = collabRepo.findByProjectIdAndUserId(projectId, targetUserId)
+                                .orElseThrow(() -> new ResourceNotFoundException("Collaborator not found"));
+
+                if (collab.getStatus() != CollaboratorStatus.ACCEPTED) {
+                        throw new IllegalStateException("Cannot change role of pending collaborator");
+                }
+
+                collab.setRole(newRole);
+
+                if (collab.getRole() == CollaboratorRole.OWNER
+                                && newRole != CollaboratorRole.OWNER) {
+
+                        long ownerCount = collabRepo.countByProjectIdAndRole(
+                                        projectId,
+                                        CollaboratorRole.OWNER);
+
+                        if (ownerCount <= 1) {
+                                throw new IllegalStateException(
+                                                "Cannot demote the last project owner");
+                        }
+                }
+
+                return collabRepo.save(collab);
         }
-
-        collabRepo.delete(collab);
-    }
-
-    // LIST PROJECT COLLABORATORS
-    @Override
-    public List<CollaboratorResponse> listProjectCollaborators(
-            UUID projectId,
-            UUID requesterId
-    ) {
-        accessManager.require(
-                projectId,
-                requesterId,
-                ProjectPermission.READ_COLLABORATORS
-        );
-
-        return collabRepo.findAllByProjectId(projectId)
-                .stream()
-                .map(c -> new CollaboratorResponse(
-                        c.getUser().getId(),
-                        c.getUser().getEmail(),
-                        c.getRole(),
-                        c.getStatus(),
-                        c.getInvitedAt(),
-                        c.getAcceptedAt()
-                ))
-                .collect(Collectors.toList());
-    }
-
-
-     // LIST USER PROJECTS (ACCEPTED ONLY)
-    @Override
-    public List<CollaboratorResponse> listUserProjects(UUID userId) {
-
-        return collabRepo.findAllByUserId(userId)
-                .stream()
-                .filter(c -> c.getStatus() == CollaboratorStatus.ACCEPTED)
-                .map(c -> new CollaboratorResponse(
-                        c.getProject().getId(),
-                        c.getProject().getName(),
-                        c.getRole(),
-                        c.getStatus(),
-                        c.getInvitedAt(),
-                        c.getAcceptedAt()
-                ))
-                .collect(Collectors.toList());
-    }
-
-
-
-    // UPDATE ROLE (OWNER ONLY)
-    @Override
-    @Transactional
-    public ProjectCollaborator updateRole(
-            UUID projectId,
-            UUID targetUserId,
-            CollaboratorRole newRole,
-            UUID requesterId
-    ) {
-        accessManager.requireOwner(projectId, requesterId);
-
-        ProjectCollaborator collab =
-                collabRepo.findByProjectIdAndUserId(projectId, targetUserId)
-                        .orElseThrow(() ->
-                                new ResourceNotFoundException("Collaborator not found"));
-
-        if (collab.getStatus() != CollaboratorStatus.ACCEPTED) {
-            throw new IllegalStateException("Cannot change role of pending collaborator");
-        }
-
-        collab.setRole(newRole);
-
-        if (collab.getRole() == CollaboratorRole.OWNER
-                && newRole != CollaboratorRole.OWNER) {
-
-            long ownerCount =
-                    collabRepo.countByProjectIdAndRole(
-                            projectId,
-                            CollaboratorRole.OWNER
-                    );
-
-            if (ownerCount <= 1) {
-                throw new IllegalStateException(
-                        "Cannot demote the last project owner"
-                );
-            }
-        }
-
-        return collabRepo.save(collab);
-    }
 
 }
