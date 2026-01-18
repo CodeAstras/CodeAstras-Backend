@@ -42,6 +42,7 @@ public class SecurityConfig {
         return new HttpCookieOAuth2AuthorizationRequestRepository();
     }
 
+
     // SECURITY FILTER CHAIN
     @Bean
     public SecurityFilterChain filterChain(
@@ -75,14 +76,13 @@ public class SecurityConfig {
                     return cfg;
                 }))
 
-                // CSRF / SESSION
+                //CSRF / SESSION
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm ->
                         sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                //  AUTHORIZATION
+                // AUTHORIZATION
                 .authorizeHttpRequests(auth -> auth
-
 
                         // PUBLIC ENDPOINTS
                         // Public profile (READ ONLY)
@@ -103,21 +103,26 @@ public class SecurityConfig {
                                 "/ws/info/**"
                         ).permitAll()
 
-                        // PROTECTED PROFILE ENDPOINTS
+
+                        // PROTECTED ENDPOINTS
+                        // Private profile endpoints
                         .requestMatchers("/api/profiles/me/**").authenticated()
+
+                        // 🚨 FILE UPLOADS (CRITICAL FIX)
+                        .requestMatchers("/api/uploads/**").authenticated()
 
                         // EVERYTHING ELSE
                         .anyRequest().authenticated()
                 )
 
-                // EXCEPTIONS
+                //EXCEPTIONS
                 .exceptionHandling(ex ->
                         ex.authenticationEntryPoint(
                                 new RestAuthenticationEntryPoint()
                         )
                 )
 
-                //OAUTH2 LOGIN
+                // OAUTH2 LOGIN
                 .oauth2Login(oauth -> oauth
                         .authorizationEndpoint(a -> a
                                 .authorizationRequestRepository(
@@ -131,7 +136,7 @@ public class SecurityConfig {
                         .failureHandler(oauth2FailureHandler)
                 )
 
-                //JWT FILTER
+                // JWT FILTER
                 // Must come AFTER OAuth2 processing
                 .addFilterBefore(
                         jwtFilter,
