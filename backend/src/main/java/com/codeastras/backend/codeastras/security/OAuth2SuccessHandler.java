@@ -85,8 +85,15 @@ public class OAuth2SuccessHandler implements AuthenticationSuccessHandler {
             String randomPwd = UUID.randomUUID().toString();
             String hashed = passwordEncoder.encode(randomPwd);
 
-            User u = new User(name, username, finalEmail, hashed);
+            User u = new User(
+                    name,
+                    username,
+                    finalEmail,
+                    hashed,
+                    oauth.getAuthorizedClientRegistrationId().toUpperCase()
+            );
             return userRepo.save(u);
+
         });
 
         // ---- Refresh Token & DB session (USE AUTH SERVICE TO AVOID HASHING MISMATCH) ----
