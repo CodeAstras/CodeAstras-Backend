@@ -10,4 +10,9 @@ public class CodeastrasApplication {
 		SpringApplication.run(CodeastrasApplication.class, args);
 	}
 
+	@org.springframework.context.annotation.Bean
+	public com.fasterxml.jackson.databind.ObjectMapper objectMapper() {
+		return new com.fasterxml.jackson.databind.ObjectMapper()
+				.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+	}
 }

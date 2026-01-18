@@ -2,6 +2,7 @@ package com.codeastras.backend.codeastras.entity.chat;
 
 public enum MessageType {
     TEXT,
+    USER,
     FILE,
     SYSTEM,
 
